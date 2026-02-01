@@ -60,7 +60,6 @@ async def communication_menu_handler(message: Message, user: dict | None):
         reply_markup=get_communication_menu()
     )
 
-
 @router.message(F.text == "👥 Друзья")
 async def show_friends(message: Message, user: dict | None):
     if user is None or not user.get("registered"):
@@ -83,7 +82,6 @@ async def show_friends(message: Message, user: dict | None):
             [InlineKeyboardButton(text="❌ Удалить", callback_data=f"del_friend_{f['tg_id']}")]
         ])
         await message.answer(text, reply_markup=kb)
-
 
 @router.message(F.text == "🔍 Поиск друзей")
 async def find_friends_menu(message: Message, state: FSMContext, user: dict | None):
@@ -111,7 +109,6 @@ async def search_conditions(message: Message, state: FSMContext, user: dict | No
         search_interests=[]
     )
     await message.answer("Укажите параметры поиска:", reply_markup=get_search_filters_keyboard())
-
 
 @router.callback_query(F.data == "filter_gender")
 async def filter_gender(callback: types.CallbackQuery):
@@ -148,7 +145,6 @@ async def filter_age(callback: types.CallbackQuery):
 @router.callback_query(lambda c: c.data.startswith("set_age_"))
 async def set_age_range(callback: types.CallbackQuery, state: FSMContext):
     r = callback.data.split("_")[2]
-    # Validate age range format
     if not r or '-' not in r:
         await callback.answer("Неверный формат")
         return
@@ -308,7 +304,6 @@ async def perform_search(message: Message, user: dict, defaults=True, state: FSM
         else:
             await message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)
 
-
 @router.callback_query(lambda c: c.data.startswith("add_req_"))
 async def add_friend_request_handler(callback: types.CallbackQuery, user: dict | None):
     if user is None or not user.get("registered"):
@@ -321,8 +316,6 @@ async def add_friend_request_handler(callback: types.CallbackQuery, user: dict |
         await callback.answer("Ошибка данных.")
         return
     
-
-    
     if target_id == user["tg_id"]:
         await callback.answer("Нельзя добавить себя в друзья.")
         return
@@ -330,8 +323,6 @@ async def add_friend_request_handler(callback: types.CallbackQuery, user: dict |
     result = send_friend_request(user["tg_id"], target_id)
     if result == "ok":
         await callback.answer("Заявка отправлена! 📩")
-        
-
         
         try:
             kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -352,7 +343,6 @@ async def add_friend_request_handler(callback: types.CallbackQuery, user: dict |
     else:
         await callback.answer("Ошибка.")
 
-
 @router.callback_query(lambda c: c.data.startswith("accept_req_"))
 async def accept_request_handler(callback: types.CallbackQuery, user: dict | None):
     if user is None or not user.get("registered"):
@@ -368,7 +358,6 @@ async def accept_request_handler(callback: types.CallbackQuery, user: dict | Non
     if accept_friend_request(user["tg_id"], requester_id):
         await callback.message.edit_text("✅ Заявка принята! Теперь вы друзья.")
         await callback.answer()
-
         try:
             safe_name = escape_html(user['name'])
             await callback.bot.send_message(requester_id, f"🎉 {safe_name} принял вашу заявку в друзья!")
@@ -392,7 +381,6 @@ async def decline_request_handler(callback: types.CallbackQuery, user: dict | No
     await callback.message.edit_text("❌ Заявка отклонена.")
     await callback.answer()
 
-
 @router.callback_query(lambda c: c.data.startswith("del_friend_"))
 async def delete_friend_handler(callback: types.CallbackQuery, user: dict | None):
     if user is None or not user.get("registered"):
@@ -405,8 +393,6 @@ async def delete_friend_handler(callback: types.CallbackQuery, user: dict | None
         await callback.answer("Ошибка данных.")
         return
     
-
-    
     if not check_is_friend(user["tg_id"], target_id):
         await callback.answer("Этот пользователь не в вашем списке друзей.")
         return
@@ -415,7 +401,6 @@ async def delete_friend_handler(callback: types.CallbackQuery, user: dict | None
     
     await callback.message.delete() 
     await callback.answer("Друг удален 🗑")
-
 
 @router.callback_query(lambda c: c.data.startswith("write_msg_"))
 async def write_message_start(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
@@ -428,8 +413,6 @@ async def write_message_start(callback: types.CallbackQuery, state: FSMContext, 
     except (ValueError, IndexError):
         await callback.answer("Ошибка данных.")
         return
-    
-
     
     target_user = get_user_by_tg_id(target_id)
     if not target_user:

@@ -48,13 +48,11 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             organizer_phone TEXT NOT NULL,
             name TEXT NOT NULL,
-            name TEXT NOT NULL,
-            date TEXT NOT NULL,
-            time TEXT NOT NULL,
-            interests TEXT,
+            date TEXT NOT NULL,          -- ДД.ММ.ГГГГ
+            time TEXT NOT NULL,          -- ЧЧ:ММ
+            interests TEXT,              -- через запятую
             address TEXT,
-            address TEXT,
-            latitude REAL,
+            latitude REAL,               -- координаты для карты
             longitude REAL,
             description TEXT,
             photo_file_id TEXT,

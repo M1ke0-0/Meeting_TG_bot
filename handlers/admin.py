@@ -37,7 +37,7 @@ async def admin_process_excel(message: Message, state: FSMContext, user: dict | 
         await message.answer("🚫 Поддерживаются только Excel-файлы")
         return
 
-    MAX_FILE_SIZE = 5 * 1024 * 1024
+    MAX_FILE_SIZE = 5 * 1024 * 1024  
     if doc.file_size and doc.file_size > MAX_FILE_SIZE:
         await message.answer("🚫 Файл слишком большой. Максимум 5MB.")
         return
@@ -80,7 +80,7 @@ async def admin_process_excel(message: Message, state: FSMContext, user: dict | 
         try:
             await message.delete()
         except Exception:
-            pass
+            pass  
 
 @router.message(F.text == "📊 Отчет по пользователям")
 async def generate_users_report(message: Message, user: dict | None):

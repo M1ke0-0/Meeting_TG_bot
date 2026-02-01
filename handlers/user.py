@@ -144,7 +144,7 @@ async def start_edit_profile(callback: types.CallbackQuery, state: FSMContext, u
         document_file_id=user["document_file_id"],
         location_lat=user["location_lat"],
         location_lon=user["location_lon"],
-        single_edit=False
+        single_edit=False 
     )
     
     from keyboards.builders import get_edit_profile_menu
@@ -161,11 +161,6 @@ async def back_to_profile_handler(callback: types.CallbackQuery, state: FSMConte
         await callback.message.delete()
     except:
         pass
-    try:
-        await callback.message.delete()
-    except:
-        pass
-    
     await show_my_profile(callback.message, user)
     await callback.answer()
 
@@ -274,6 +269,7 @@ async def edit_field_location(callback: types.CallbackQuery, state: FSMContext, 
 
 @router.message(F.text == "❓ Помощь")
 async def show_help(message: Message, user: dict | None):
+    """Display help message with brief bot usage instructions."""
     help_text = (
         "📖 <b>Инструкция по работе с ботом</b>\n\n"
         

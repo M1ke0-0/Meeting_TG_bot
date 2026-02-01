@@ -29,9 +29,11 @@ async def main():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
+    # Middleware
     dp.message.middleware(UserMiddleware())
     dp.callback_query.middleware(UserMiddleware())
 
+    # Routers
     dp.include_router(user.router)
     dp.include_router(registration.router)
     dp.include_router(admin.router)

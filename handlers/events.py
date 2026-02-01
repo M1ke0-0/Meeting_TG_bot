@@ -224,9 +224,8 @@ async def show_invite_friends_list(message: Message, state: FSMContext):
     interests = data.get("interests", [])
 
     friends = find_potential_friends(
-        str(message.from_user.id),
+        str(message.from_user.id), 
         interests
-    )
     )
 
     if not friends:
@@ -547,6 +546,7 @@ async def leave_event(callback: types.CallbackQuery, user: dict | None):
 
 @router.callback_query(lambda c: c.data.startswith("view_map_"))
 async def view_on_map(callback: types.CallbackQuery, user: dict | None):
+    """Shows event name, address, and venue with coordinates per TZ."""
     try:
         event_id = int(callback.data.split("_")[2])
     except (ValueError, IndexError):
@@ -556,8 +556,6 @@ async def view_on_map(callback: types.CallbackQuery, user: dict | None):
     event = get_event_by_id(event_id)
     if not event:
         await callback.answer("Мероприятие не найдено!", show_alert=True)
-        return
-    
         return
     
     safe_name = escape_html(event.get('name', 'Мероприятие'))

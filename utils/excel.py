@@ -3,6 +3,10 @@ from openpyxl import Workbook
 from config import DB_PATH
 
 def export_users_report(filepath: str):
+    """
+    Generates an Excel report of all users.
+    Columns: Phone, Role, Name, Surname, Gender, Age, Region, Interests, Photo ID
+    """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
@@ -21,11 +25,16 @@ def export_users_report(filepath: str):
     ws.append(headers)
 
     for row in rows:
-        ws.append(list(row))
+        ws.append(list(row))  
 
     wb.save(filepath)
 
 def export_events_report(filepath: str):
+    """
+    Generates an Excel report of all events.
+    Columns: ID, Name, Date, Time, Interests, Address, Description, Organizer Phone, 
+             Organizer Name, Organizer Surname, Photo File ID, Document File ID, Participants Count
+    """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
@@ -64,6 +73,7 @@ def export_events_report(filepath: str):
     ws.append(headers)
 
     for row in rows:
-        ws.append(list(row))
+        ws.append(list(row)) 
 
     wb.save(filepath)
+

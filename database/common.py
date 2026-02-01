@@ -22,7 +22,7 @@ def replace_regions(regions: list[str]):
         conn.commit()
 
 def get_all_regions() -> list[str]:
-def get_all_regions() -> list[str]:
+    """Возвращает актуальный список регионов из БД"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT name FROM regions ORDER BY name")
@@ -30,7 +30,7 @@ def get_all_regions() -> list[str]:
     return regions if regions else ["Регионы пока не добавлены"]
 
 def get_all_interests() -> list[str]:
-def get_all_interests() -> list[str]:
+    """Возвращает актуальный список интересов из БД"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT name FROM interests ORDER BY name")

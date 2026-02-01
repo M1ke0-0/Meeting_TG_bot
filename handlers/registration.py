@@ -45,7 +45,7 @@ async def resume_registration(message: Message, state: FSMContext, user: dict | 
 @router.message(F.contact)
 async def process_contact(message: Message, state: FSMContext, user: dict | None):
     raw_phone = message.contact.phone_number.strip()
-    phone = normalize_phone(raw_phone)
+    phone = normalize_phone(raw_phone)  
     tg_id = message.from_user.id
 
     if user is not None:
@@ -258,6 +258,7 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
     interests = data.get('interests', [])
 
     if callback.data == "keep_current":
+        
         if data.get("single_edit"):
             await callback.message.answer("Готово!", reply_markup=get_user_main_menu())
             await callback.message.answer("Интересы оставлены без изменений.", reply_markup=get_edit_profile_menu())

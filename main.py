@@ -89,9 +89,9 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             organizer_phone TEXT NOT NULL,
             name TEXT NOT NULL,
-            date TEXT NOT NULL,
-            time TEXT NOT NULL,
-            interests TEXT,
+            date TEXT NOT NULL,          -- ДД.ММ.ГГГГ
+            time TEXT NOT NULL,          -- ЧЧ:ММ
+            interests TEXT,              -- через запятую
             address TEXT,
             description TEXT,
             photo_file_id TEXT,
@@ -143,6 +143,7 @@ def init_admin_tables():
 
 
 def check_user_status(phone: str) -> dict:
+    """Возвращает статус пользователя или None"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("""
@@ -162,6 +163,7 @@ def check_user_status(phone: str) -> dict:
     return {"exists": False}
 
 def register_phone(phone: str, tg_id: int):
+    """Добавляем только номер + tg_id, роль по умолчанию 'user'"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         try:
@@ -176,6 +178,7 @@ def register_phone(phone: str, tg_id: int):
 
 
 def update_user_profile(phone: str, data: dict):
+    """Обновляем профиль пользователя в БД"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("""
@@ -218,6 +221,7 @@ def replace_regions(regions: list[str]):
         conn.commit()
 
 def get_all_regions() -> list[str]:
+    """Возвращает актуальный список регионов из БД"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT name FROM regions ORDER BY name")
@@ -226,6 +230,7 @@ def get_all_regions() -> list[str]:
 
 
 def get_all_interests() -> list[str]:
+    """Возвращает актуальный список интересов из БД"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT name FROM interests ORDER BY name")
@@ -234,6 +239,7 @@ def get_all_interests() -> list[str]:
 
 
 def get_user_by_tg_id(tg_id: int) -> dict | None:
+    """Получает все данные пользователя по telegram ID"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("""
@@ -257,9 +263,9 @@ def get_user_by_tg_id(tg_id: int) -> dict | None:
 
 
 
-
 def get_event_card_keyboard_optimized(event_id: int, user_phone: str, 
                                      organizer_phone: str, is_participant: bool):
+    """Клавиатура для карточки мероприятия (БЕЗ запроса к БД)"""
     if user_phone == organizer_phone:
         return None
     
@@ -317,6 +323,7 @@ def get_gender_keyboard(edit_mode=False):
 
 
 def get_region_keyboard(edit_mode=False):
+    """Динамическая клавиатура регионов из БД"""
     regions = get_all_regions()
     kb = [[KeyboardButton(text=region)] for region in regions]
     
@@ -330,6 +337,7 @@ def get_region_keyboard(edit_mode=False):
     )
 
 def get_interests_keyboard(selected: list[str] = [], edit_mode=False) -> InlineKeyboardMarkup:
+    """Динамическая inline-клавиатура интересов из БД"""
     interests = get_all_interests()
     inline_kb = InlineKeyboardMarkup(inline_keyboard=[])
     for interest in interests:
@@ -378,8 +386,7 @@ def get_user_main_menu():
             [KeyboardButton(text="❓ Помощь")],
         ],
         resize_keyboard=True,
-
-        one_time_keyboard=False
+        one_time_keyboard=False  
     )
 
 def get_events_menu_keyboard():
@@ -395,6 +402,7 @@ def get_events_menu_keyboard():
 
 
 async def get_event_card_text(event: dict):
+    """Формирует текст карточки мероприятия"""
     text = f"<b>{event['name']}</b>\n"
     text += f"📅 {event['date']} в {event['time']}\n"
     if event['address']:
@@ -414,8 +422,7 @@ async def find_potential_friends(organizer_phone: str, interests: list[str] = No
             FROM users
             WHERE number != ?
             AND registered = 1
-
-            AND tg_id IS NOT NULL
+            AND tg_id IS NOT NULL  -- только те, кто заходил в бот
         """
         params = [organizer_phone]
 
@@ -433,9 +440,8 @@ async def find_potential_friends(organizer_phone: str, interests: list[str] = No
     friends = []
     for row in rows:
         friends.append({
-
             "phone": row[0],
-            "tg_id": row[1],
+            "tg_id": row[1],         
             "name": row[2] or "—",
             "surname": row[3] or "",
             "age": row[4],
@@ -456,8 +462,7 @@ def is_valid_name(text: str) -> bool:
     return bool(re.match(r'^[a-zA-Zа-яА-ЯёЁ]+$', text))
 
 def is_valid_age(text: str) -> bool:
-    return text.isdigit() and 0 < int(text) < 120
-
+    return text.isdigit() and 0 < int(text) < 120  
 
 
 class UserMiddleware(BaseMiddleware):
@@ -538,7 +543,6 @@ async def process_event_name(message: Message, state: FSMContext):
 async def process_event_date(message: Message, state: FSMContext):
     date_str = message.text.strip()
 
-
     if not re.match(r'^\d{2}\.\d{2}\.\d{4}$', date_str):
         await message.answer("Неверный формат. Пример: 15.03.2025")
         return
@@ -548,7 +552,6 @@ async def process_event_date(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("Такая дата не существует. Попробуйте ещё раз.")
         return
-
 
     today = datetime.now().date()
     if event_date.date() < today:
@@ -563,7 +566,6 @@ async def process_event_date(message: Message, state: FSMContext):
 async def process_event_time(message: Message, state: FSMContext):
     time_str = message.text.strip()
 
-
     if not re.match(r'^\d{2}:\d{2}$', time_str):
         await message.answer("Неверный формат. Пример: 18:30")
         return
@@ -576,10 +578,8 @@ async def process_event_time(message: Message, state: FSMContext):
         await message.answer("Такого времени не бывает. Попробуйте ещё раз.")
         return
 
-
     data = await state.get_data()
     event_date = data.get("event_date_obj")
-
 
     now = datetime.now()
     if event_date.date() == now.date():
@@ -633,7 +633,7 @@ async def process_event_address(message: Message, state: FSMContext):
 
 @dp.message(CreateEvent.description, F.text == "Пропустить")
 async def skip_event_description(message: Message, state: FSMContext):
-    await state.update_data(description=None)
+    await state.update_data(description=None)  
     await state.set_state(CreateEvent.photo)
     await message.answer(
         "Загрузите фото мероприятия (jpg, jpeg, png) или пропустите:",
@@ -693,7 +693,7 @@ async def show_invite_friends_list(message: Message, state: FSMContext):
     interests = data.get("interests", [])
 
     friends = await find_potential_friends(
-        message.from_user.id,
+        message.from_user.id,  
         interests
     )
 
@@ -719,7 +719,7 @@ async def show_invite_friends_list(message: Message, state: FSMContext):
         kb.inline_keyboard.append([
             InlineKeyboardButton(
                 text=row,
-                callback_data=f"invite_friend_{friend['tg_id']}"
+                callback_data=f"invite_friend_{friend['tg_id']}"  
             )
         ])
 
@@ -923,7 +923,7 @@ async def save_event(message: Message, state: FSMContext, user: dict | None):
                 data.get("address"), data.get("description"),
                 data.get("photo_file_id"), data.get("document_file_id")
             ))
-            conn.commit()  
+            conn.commit() 
         
         await message.answer("Мероприятие успешно создано! 🎉", 
                            reply_markup=get_user_main_menu())
@@ -1310,7 +1310,7 @@ async def admin_process_excel(message: Message, state: FSMContext, user: dict | 
         return
 
     file_id = uuid.uuid4()
-    file_ext = os.path.splitext(doc.file_name)[1] 
+    file_ext = os.path.splitext(doc.file_name)[1]  
     file_path = f"/tmp/{file_id}{file_ext}"
 
     try:
@@ -1497,7 +1497,7 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
         
         await callback.message.answer(
             "Загрузите фото (jpg, jpeg, png) или пропустите:",
-            reply_markup=get_photo_keyboard(edit_mode)  
+            reply_markup=get_photo_keyboard(edit_mode) 
         )
         await callback.answer()
         return
@@ -1535,7 +1535,6 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
 async def reg_photo_keep(message: Message, state: FSMContext, user: dict | None):
     data = await state.get_data()
     edit_mode = data.get("edit_mode", False)
-    
     
     if edit_mode:
         current = "есть" if data.get("location_lat") else "нет"
@@ -1633,7 +1632,7 @@ async def ask_user_location(message: Message, edit_mode=False):
         "💻 На ПК — выберите «Ручной ввод» и введите координаты вручную "
         "(широта, долгота, например: 55.7558, 37.6173).\n"
         "Можно также нажать «Пропустить», если не хотите указывать местоположение.",
-        reply_markup=get_location_keyboard(edit_mode)  
+        reply_markup=get_location_keyboard(edit_mode) 
     )
 
 

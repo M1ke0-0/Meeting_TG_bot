@@ -1,7 +1,15 @@
+"""
+Geocoding utilities for converting addresses to coordinates.
+Uses Nominatim (OpenStreetMap) free API.
+"""
 import aiohttp
 import logging
 
 async def geocode_address(address: str) -> tuple[float, float] | None:
+    """
+    Convert text address to latitude/longitude using Nominatim API.
+    Returns (lat, lon) tuple or None if geocoding fails.
+    """
     if not address:
         return None
     
@@ -11,10 +19,10 @@ async def geocode_address(address: str) -> tuple[float, float] | None:
             "q": address,
             "format": "json",
             "limit": 1,
-            "countrycodes": "ru"
+            "countrycodes": "ru"  
         }
         headers = {
-            "User-Agent": "TelegramBot/1.0"
+            "User-Agent": "TelegramBot/1.0"  
         }
         
         async with aiohttp.ClientSession() as session:

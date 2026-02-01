@@ -2,6 +2,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 from database.common import get_all_regions, get_all_interests
 
 def get_edit_profile_menu():
+    """Клавиатура для меню редактирования профиля"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Имя", callback_data="edit_field_name"),
          InlineKeyboardButton(text="✏️ Фамилия", callback_data="edit_field_surname")],
@@ -16,8 +17,9 @@ def get_edit_profile_menu():
 
 def get_event_card_keyboard_optimized(event_id: int, user_phone: str, 
                                      organizer_phone: str, is_participant: bool):
+    """Клавиатура для карточки мероприятия друзей (с кнопкой карты по ТЗ)"""
     if user_phone == organizer_phone:
-        return None
+        return None  
     
     buttons = [[InlineKeyboardButton(text="🗺 Смотреть на карте", 
                                     callback_data=f"view_map_{event_id}")]]
@@ -32,6 +34,7 @@ def get_event_card_keyboard_optimized(event_id: int, user_phone: str,
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_my_event_card_keyboard(event_id: int, is_organizer: bool):
+    """Клавиатура для карточки 'Мои мероприятия' (с кнопками карты и участников по ТЗ)"""
     buttons = [
         [InlineKeyboardButton(text="🗺 Смотреть на карте", 
                              callback_data=f"view_map_{event_id}")],
@@ -63,6 +66,7 @@ def get_skip_edit_keyboard():
     )
 
 def get_event_creation_keyboard():
+    """Standard keyboard for event creation with cancel option."""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="❌ Отменить создание")]
@@ -98,6 +102,7 @@ def get_gender_keyboard(edit_mode=False):
 
 
 def get_region_keyboard(edit_mode=False):
+    """Динамическая клавиатура регионов из БД"""
     regions = get_all_regions()
     kb = [[KeyboardButton(text=region)] for region in regions]
     
@@ -111,6 +116,7 @@ def get_region_keyboard(edit_mode=False):
     )
 
 def get_interests_keyboard(selected: list[str] = [], edit_mode=False) -> InlineKeyboardMarkup:
+    """Динамическая inline-клавиатура интересов из БД"""
     interests = get_all_interests()
     inline_kb = InlineKeyboardMarkup(inline_keyboard=[])
     for interest in interests:
@@ -160,7 +166,7 @@ def get_user_main_menu():
             [KeyboardButton(text="❓ Помощь")],
         ],
         resize_keyboard=True,
-        one_time_keyboard=False
+        one_time_keyboard=False  
     )
 
 def get_events_menu_keyboard():

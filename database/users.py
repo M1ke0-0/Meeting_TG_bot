@@ -2,6 +2,7 @@ import sqlite3
 from config import DB_PATH, ADMIN_PHONES
 
 def check_user_status(phone: str) -> dict:
+    """Возвращает статус пользователя или None"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("""
@@ -21,6 +22,7 @@ def check_user_status(phone: str) -> dict:
     return {"exists": False}
 
 def register_phone(phone: str, tg_id: int):
+    """Добавляем номер + tg_id, роль определяется по ADMIN_PHONES"""
     role = "admin" if phone in ADMIN_PHONES else "user"
     
     with sqlite3.connect(DB_PATH) as conn:
@@ -36,6 +38,7 @@ def register_phone(phone: str, tg_id: int):
             return False
 
 def update_user_profile(phone: str, data: dict):
+    """Обновляем профиль пользователя в БД"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("""
@@ -55,6 +58,7 @@ def update_user_profile(phone: str, data: dict):
         conn.commit()
 
 def get_user_by_tg_id(tg_id: int) -> dict | None:
+    """Получает все данные пользователя по telegram ID"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("""
@@ -84,7 +88,7 @@ def find_potential_friends(organizer_phone: str, interests: list[str] = None):
             FROM users
             WHERE number != ?
             AND registered = 1
-            AND tg_id IS NOT NULL
+            AND tg_id IS NOT NULL  -- только те, кто заходил в бот
         """
         params = [organizer_phone]
 
@@ -161,12 +165,16 @@ def check_is_friend(user_id: int, target_id: int) -> bool:
         return bool(c.fetchone())
 
 def send_friend_request(from_user_id: int, to_user_id: int):
+    """Создает заявку в друзья"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         try:
+            c.execute("SELECT 1 FROM friends WHERE user_id = ? AND friend_id = ?", (from_user_id, to_user_id))
+            if c.fetchone(): return "already_friends"
+
             c.execute("SELECT 1 FROM friend_requests WHERE from_user_id = ? AND to_user_id = ?", (from_user_id, to_user_id))
             if c.fetchone(): return "already_sent"
-
+            
             c.execute("INSERT INTO friend_requests (from_user_id, to_user_id) VALUES (?, ?)", (from_user_id, to_user_id))
             conn.commit()
             return "ok"
@@ -174,6 +182,7 @@ def send_friend_request(from_user_id: int, to_user_id: int):
             return "error"
 
 def get_incoming_requests(user_id: int):
+    """Получить входящие заявки"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("""
@@ -198,6 +207,7 @@ def get_incoming_requests(user_id: int):
     return requests
 
 def accept_friend_request(user_id: int, requester_id: int):
+    """Принять заявку: добавить в друзья обоих и удалить заявку"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         try:
@@ -211,12 +221,14 @@ def accept_friend_request(user_id: int, requester_id: int):
             return False
 
 def decline_friend_request(user_id: int, requester_id: int):
+    """Отклонить заявку"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("DELETE FROM friend_requests WHERE from_user_id = ? AND to_user_id = ?", (requester_id, user_id))
         conn.commit()
 
 def delete_friend_db(user_id: int, friend_id: int):
+    """Удалить друга (bidirectional)"""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("DELETE FROM friends WHERE user_id = ? AND friend_id = ?", (user_id, friend_id))

@@ -5,11 +5,13 @@ from aiogram.enums import ParseMode
 from utils.validation import escape_html
 
 def mask_phone(phone: str) -> str:
+    """Mask phone number for privacy, showing only last 4 digits."""
     if not phone or len(phone) < 4:
         return "***"
     return f"***{phone[-4:]}"
 
 async def get_event_card_text(event: dict):
+    """Формирует текст карточки мероприятия с экранированием HTML"""
     safe_name = escape_html(event.get('name', ''))
     safe_address = escape_html(event.get('address', ''))
     safe_interests = escape_html(event.get('interests', ''))
@@ -49,6 +51,7 @@ def create_event_db(user_phone: str, data: dict):
         return False
 
 def get_friends_events(user_phone: str):
+    """Get events from friends only (not user's own events) per TZ 1.3.1."""
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("""
@@ -62,16 +65,17 @@ def get_friends_events(user_phone: str):
             INNER JOIN users u ON e.organizer_phone = u.number
             WHERE e.organizer_phone != ?
               AND u.tg_id IN (
+                  -- Friends where I am user_id
                   SELECT f.friend_id FROM friends f
                   INNER JOIN users me ON f.user_id = me.tg_id
                   WHERE me.number = ?
                   UNION
+                  -- Friends where I am friend_id
                   SELECT f.user_id FROM friends f
                   INNER JOIN users me ON f.friend_id = me.tg_id
                   WHERE me.number = ?
               )
             ORDER BY e.date ASC, e.time ASC
-
         """, (user_phone, user_phone, user_phone, user_phone))
         return c.fetchall()
 
@@ -152,6 +156,7 @@ def leave_event_db(event_id: int, phone: str):
         return False, str(e), None
 
 def get_event_by_id(event_id: int):
+    """Get event details by ID including coordinates."""
     try:
         with sqlite3.connect(DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
@@ -171,6 +176,7 @@ def get_event_by_id(event_id: int):
         return None
 
 def get_event_participants(event_id: int):
+    """Get list of participants for an event in format [name, surname, age]."""
     try:
         with sqlite3.connect(DB_PATH) as conn:
             c = conn.cursor()
