@@ -507,7 +507,13 @@ async def reg_location_manual_process(
     if text == "Пропустить":
         await state.update_data(location_lat=None, location_lon=None)
         updated_data = await state.get_data()
-        update_user_profile(updated_data["phone"], updated_data)
+        
+        phone = updated_data.get("phone")
+        if not phone and user:
+            phone = user.get("number")
+
+        if phone:
+            update_user_profile(phone, updated_data)
         
         if data.get("single_edit"):
             await message.answer("Готово!", reply_markup=get_user_main_menu())
@@ -532,7 +538,12 @@ async def reg_location_manual_process(
             await state.set_state(None)
             return
 
-        update_user_profile(data["phone"], data)
+        phone = data.get("phone")
+        if not phone and user:
+            phone = user.get("number")
+            
+        if phone:
+            update_user_profile(phone, data)
         await state.clear()
 
         text_msg = "Профиль обновлён!" if edit_mode else "Регистрация завершена! Добро пожаловать 🎉"
@@ -565,7 +576,13 @@ async def reg_location_manual_process(
 
     await state.update_data(location_lat=lat, location_lon=lon)
     updated_data = await state.get_data()
-    update_user_profile(updated_data["phone"], updated_data)
+    
+    phone = updated_data.get("phone")
+    if not phone and user:
+        phone = user.get("number")
+        
+    if phone:
+        update_user_profile(phone, updated_data)
     
     if data.get("single_edit"):
         await message.answer("Готово!", reply_markup=get_user_main_menu())

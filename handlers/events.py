@@ -16,8 +16,79 @@ from database.events import (
     create_event_db, get_friends_events, get_my_events, join_event_db, leave_event_db, 
     get_event_card_text, get_event_by_id, get_event_participants
 )
-from database.users import find_potential_friends
+from database.users import find_potential_friends, get_friends_db
 from utils.validation import escape_html
+
+# ... (existing imports)
+
+# Add these handlers before view_map_ or similar
+
+@router.callback_query(lambda c: c.data.startswith("invite_more_"))
+async def invite_more_handler(callback: types.CallbackQuery, user: dict | None):
+    try:
+        event_id = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка данных.", show_alert=True)
+        return
+
+    friends = get_friends_db(user["tg_id"])
+    
+    if not friends:
+        await callback.answer("У вас пока нет друзей, которых можно пригласить.", show_alert=True)
+        return
+        
+    kb = InlineKeyboardMarkup(inline_keyboard=[])
+    for friend in friends:
+        name = f"{friend['name']} {friend['surname']}".strip()
+        row = f"[{name}]"
+        kb.inline_keyboard.append([
+             InlineKeyboardButton(
+                text=row,
+                callback_data=f"send_invite_{event_id}_{friend['tg_id']}" 
+            )
+        ])
+    
+    kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Закрыть", callback_data="close_invite_list")])
+    
+    await callback.message.answer("Выберите друга для приглашения:", reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("send_invite_"))
+async def send_one_invite_handler(callback: types.CallbackQuery, user: dict | None):
+    try:
+        parts = callback.data.split("_")
+        event_id = int(parts[2])
+        friend_id = int(parts[3])
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка данных.", show_alert=True)
+        return
+
+    event = get_event_by_id(event_id)
+    if not event:
+        await callback.answer("Мероприятие не найдено.", show_alert=True)
+        return
+
+    safe_name = escape_html(user['name'])
+    event_name = escape_html(event['name'])
+    
+    msg_text = (
+        f"👋 Привет! Друг {safe_name} приглашает тебя на мероприятие:\n"
+        f"<b>{event_name}</b>\n\n"
+        f"Посмотреть: <b>🎉 Мероприятия -> Мероприятия друзей</b>"
+    )
+
+    try:
+        await callback.bot.send_message(friend_id, msg_text, parse_mode=ParseMode.HTML)
+        await callback.answer("Приглашение отправлено! ✅", show_alert=True)
+    except Exception as e:
+        logging.error(f"Failed to send invite: {e}")
+        await callback.answer("Не удалось отправить сообщение (возможно, бот заблокирован пользователем).", show_alert=True)
+
+
+@router.callback_query(F.data == "close_invite_list")
+async def close_invite_list(callback: types.CallbackQuery):
+    await callback.message.delete()
 from utils.geocoding import geocode_address
 
 router = Router()
@@ -223,10 +294,15 @@ async def show_invite_friends_list(message: Message, state: FSMContext):
     data = await state.get_data()
     interests = data.get("interests", [])
 
-    friends = find_potential_friends(
-        str(message.from_user.id), 
-        interests
-    )
+    # Исправлено: показываем только реальных друзей, а не всех подряд
+    friends = get_friends_db(message.from_user.id)
+    
+    # Опционально: можно сортировать друзей, у которых совпадают интересы
+    if interests and friends:
+        friends.sort(
+            key=lambda f: len(set(interests) & set(f["interests"].split(','))) if f["interests"] else 0,
+            reverse=True
+        )
 
     if not friends:
         await message.answer(

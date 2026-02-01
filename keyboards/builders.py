@@ -42,6 +42,10 @@ def get_my_event_card_keyboard(event_id: int, is_organizer: bool):
                              callback_data=f"view_participants_{event_id}")]
     ]
     
+    if is_organizer:
+        buttons.append([InlineKeyboardButton(text="➕ Пригласить друзей", 
+                                             callback_data=f"invite_more_{event_id}")])
+    
     if not is_organizer:
         buttons.append([InlineKeyboardButton(text="❌ Отказаться от участия", 
                                 callback_data=f"leave_event_{event_id}")])
