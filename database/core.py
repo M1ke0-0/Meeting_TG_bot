@@ -72,6 +72,18 @@ def init_db():
             FOREIGN KEY (participant_phone) REFERENCES users(number)
         )
     ''')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS event_invites (
+            event_id INTEGER,
+            invited_phone TEXT,
+            status TEXT DEFAULT 'pending', -- pending, accepted, declined
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (event_id, invited_phone),
+            FOREIGN KEY (event_id) REFERENCES events(id),
+            FOREIGN KEY (invited_phone) REFERENCES users(number)
+        )
+    ''')
         
     conn.commit()
     conn.close()

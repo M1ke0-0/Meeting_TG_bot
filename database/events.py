@@ -44,6 +44,12 @@ def create_event_db(user_phone: str, data: dict):
                 data.get("description"),
                 data.get("photo_file_id"), data.get("document_file_id")
             ))
+            event_id = c.lastrowid
+            c.execute("""
+                INSERT INTO event_participants (event_id, participant_phone)
+                VALUES (?, ?)
+            """, (event_id, user_phone))
+            
             conn.commit()
             return True
     except Exception as e:
@@ -110,6 +116,36 @@ def get_my_events(user_phone: str):
         
         return organized, participated
 
+def create_invite_db(event_id: int, phone: str):
+    """Create or update invitation record."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("""
+                INSERT OR IGNORE INTO event_invites (event_id, invited_phone, status)
+                VALUES (?, ?, 'pending')
+            """, (event_id, phone))
+            
+            conn.commit()
+            return True
+    except Exception as e:
+        logging.error(f"Error creating invite: {e}")
+        return False
+
+def get_invite_status_db(event_id: int, phone: str):
+    """Get status of invitation: None, 'pending', 'accepted', 'declined'"""
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("SELECT status FROM event_invites WHERE event_id = ? AND invited_phone = ?", (event_id, phone))
+        row = c.fetchone()
+        return row[0] if row else None
+
+def update_invite_status_db(event_id: int, phone: str, status: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        c = conn.cursor()
+        c.execute("UPDATE event_invites SET status = ? WHERE event_id = ? AND invited_phone = ?", (status, event_id, phone))
+        conn.commit()
+
 def join_event_db(event_id: int, phone: str):
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
@@ -118,6 +154,12 @@ def join_event_db(event_id: int, phone: str):
                 INSERT INTO event_participants (event_id, participant_phone)
                 VALUES (?, ?)
             """, (event_id, phone))
+            
+            c.execute("""
+                UPDATE event_invites SET status = 'accepted' 
+                WHERE event_id = ? AND invited_phone = ?
+            """, (event_id, phone))
+            
             conn.commit()
             return True, None
         except sqlite3.IntegrityError:
@@ -149,6 +191,11 @@ def leave_event_db(event_id: int, phone: str):
             
             if c.rowcount == 0:
                 return False, "not_participating", None
+                
+            c.execute("""
+                UPDATE event_invites SET status = 'declined' 
+                WHERE event_id = ? AND invited_phone = ?
+            """, (event_id, phone))
             
             conn.commit()
             return True, "success", organizer_phone
@@ -162,10 +209,13 @@ def get_event_by_id(event_id: int):
             conn.row_factory = sqlite3.Row
             c = conn.cursor()
             c.execute("""
-                SELECT id, name, date, time, address, latitude, longitude,
-                       interests, description, organizer_phone, 
-                       photo_file_id, document_file_id
-                FROM events WHERE id = ?
+                SELECT e.id, e.name, e.date, e.time, e.address, e.latitude, e.longitude,
+                       e.interests, e.description, e.organizer_phone, 
+                       e.photo_file_id, e.document_file_id,
+                       u.tg_id as organizer_tg_id
+                FROM events e
+                LEFT JOIN users u ON e.organizer_phone = u.number
+                WHERE e.id = ?
             """, (event_id,))
             row = c.fetchone()
             if row:
@@ -190,4 +240,20 @@ def get_event_participants(event_id: int):
             return c.fetchall()
     except Exception as e:
         logging.error(f"Error getting event participants: {e}")
+        return []
+
+def get_event_participant_ids(event_id: int):
+    """Get list of telegram IDs of participants for an event."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            c = conn.cursor()
+            c.execute("""
+                SELECT u.tg_id
+                FROM event_participants ep
+                JOIN users u ON ep.participant_phone = u.number
+                WHERE ep.event_id = ?
+            """, (event_id,))
+            return [row[0] for row in c.fetchall()]
+    except Exception as e:
+        logging.error(f"Error getting event participant IDs: {e}")
         return []
