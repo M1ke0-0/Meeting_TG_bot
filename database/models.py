@@ -210,6 +210,7 @@ class FriendRequest(Base):
         default=datetime.utcnow,
         nullable=False
     )
+    message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class Interest(Base):

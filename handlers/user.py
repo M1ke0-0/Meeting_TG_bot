@@ -197,7 +197,7 @@ async def edit_field_gender(callback: types.CallbackQuery, state: FSMContext, us
     await state.update_data(single_edit=True)
     await state.set_state(Registration.gender)
     data = await state.get_data()
-    current = data.get("gender", "не указано")
+    current = data.get("gender") or "не выбран"
     await callback.message.answer(
         f"Текущий пол: {current}\nВыберите пол:",
         reply_markup=get_gender_keyboard(edit_mode=True)

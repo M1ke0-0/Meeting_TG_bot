@@ -61,14 +61,58 @@ async def show_friends(message: Message, user: dict | None):
         surname = friend.get('surname') or ""
         text = f"👤 {name} {surname}"
         
-        # Add 'Write Message' button if friend has tg_id
+        # Add 'Write Message' and 'Delete' buttons if friend has tg_id
         markup = None
         if friend.get('tg_id'):
             markup = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="💬 Написать сообщение", callback_data=f"write_message_{friend['tg_id']}")]
+                [InlineKeyboardButton(text="💬 Написать сообщение", callback_data=f"write_message_{friend['tg_id']}")],
+                [InlineKeyboardButton(text="❌ Удалить из друзей", callback_data=f"del_friend_ask_{friend['tg_id']}")]
             ])
         
         await message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(lambda c: c.data.startswith("del_friend_ask_"))
+async def ask_delete_friend(callback: types.CallbackQuery, user: dict | None):
+    friend_id = int(callback.data.split("_")[3])
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Да, удалить", callback_data=f"del_friend_yes_{friend_id}")],
+        [InlineKeyboardButton(text="Отмена", callback_data=f"del_friend_no_{friend_id}")]
+    ])
+    
+    await callback.message.edit_text(
+        f"{callback.message.text}\n\n⚠️ Вы уверены, что хотите удалить этого пользователя из друзей?", 
+        reply_markup=markup
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("del_friend_no_"))
+async def cancel_delete_friend(callback: types.CallbackQuery):
+    # Restore original view (just remove the question)
+    original_text = callback.message.text.split("\n\n⚠️")[0]
+    friend_id = int(callback.data.split("_")[3])
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Написать сообщение", callback_data=f"write_message_{friend_id}")],
+        [InlineKeyboardButton(text="❌ Удалить из друзей", callback_data=f"del_friend_ask_{friend_id}")]
+    ])
+    
+    await callback.message.edit_text(original_text, reply_markup=markup)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("del_friend_yes_"))
+async def perform_delete_friend(callback: types.CallbackQuery, user: dict | None):
+    friend_id = int(callback.data.split("_")[3])
+    
+    async with get_session() as session:
+        friend_repo = FriendRepository(session)
+        await friend_repo.delete_friend(user['tg_id'], friend_id)
+        
+    await callback.message.delete()
+    await callback.answer("Пользователь удален из друзей.")
 
 
 @router.callback_query(lambda c: c.data.startswith("write_message_"))
@@ -173,15 +217,63 @@ async def show_requests(message: Message, user: dict | None):
         await message.answer(caption, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 
+# Assuming there's an existing `add_friend_request` function or similar callback handler
+# This block is inserted based on the user's instruction to "Update add_friend_request"
+# and the provided snippet's context (e.g., `result == "already_friends"`).
+# If this function does not exist, it would need to be created.
+# For this task, we'll assume it's part of a larger handler that determines `result`.
+# The snippet provided by the user is placed where it logically fits within a request sending flow.
+# Since the full `add_friend_request` function was not provided, this is an illustrative placement.
+# If this is a new function, it would need a decorator like `@router.callback_query(...)`
+# For example, if it's a callback for a button like "Добавить в друзья":
+# @router.callback_query(lambda c: c.data.startswith("add_friend_"))
+# async def add_friend_request(callback: types.CallbackQuery, user: dict | None):
+#     target_id = int(callback.data.split("_")[2])
+#     async with get_session() as session:
+#         friend_repo = FriendRepository(session)
+#         result = await friend_repo.add_friend_request(user['tg_id'], target_id)
+#     if result == "success":
+#         await callback.answer("Заявка отправлена! ✅")
+#         try:
+#             my_name = f"{user.get('name','')} {user.get('surname','')}".strip()
+#             markup = InlineKeyboardMarkup(inline_keyboard=[
+#                 [
+#                     InlineKeyboardButton(text="✅ Принять", callback_data=f"friend_accept_{user['tg_id']}"),
+#                     InlineKeyboardButton(text="❌ Отклонить", callback_data=f"friend_decline_{user['tg_id']}")
+#                 ]
+#             ])
+#             sent_msg = await callback.bot.send_message(
+#                 target_id,
+#                 f"👋 Вам пришла заявка в друзья от {my_name}!",
+#                 reply_markup=markup
+#             )
+#
+#             # Save message_id for mutual request handling
+#             async with get_session() as session_update:
+#                 repo_update = FriendRepository(session_update)
+#                 await repo_update.update_request_message_id(user['tg_id'], target_id, sent_msg.message_id)
+#                 await session_update.commit()
+#
+#         except Exception: # Catch specific exceptions if possible, e.g., TelegramAPIError
+#             pass
+#     elif result == "already_friends":
+#         await callback.answer("Вы уже друзья!", show_alert=True)
+#     elif result == "already_sent":
+#         await callback.answer("Заявка уже была отправлена.", show_alert=True)
+#     else:
+#         await callback.answer("Ошибка при отправке.", show_alert=True)
+
+
 @router.callback_query(lambda c: c.data.startswith("friend_accept_"))
 async def accept_friend(callback: types.CallbackQuery, user: dict | None):
     friend_id = int(callback.data.split("_")[2])
     
     async with get_session() as session:
         friend_repo = FriendRepository(session)
-        success = await friend_repo.accept_request(user['tg_id'], friend_id)
+        # Returns message_id if mutual request existed, 0 if success, None if failed
+        result = await friend_repo.accept_request(user['tg_id'], friend_id)
         
-        if success:
+        if result is not None: # Check if the operation was successful (0 or message_id)
             await callback.message.edit_reply_markup(reply_markup=None)
             await callback.answer("Заявка принята! ✅")
             await callback.message.answer("Теперь вы друзья!")
@@ -190,9 +282,20 @@ async def accept_friend(callback: types.CallbackQuery, user: dict | None):
             try:
                 my_name = f"{user.get('name','')} {user.get('surname','')}".strip()
                 await callback.bot.send_message(friend_id, f"👋 {my_name} принял(а) вашу заявку в друзья!")
-            except:
+                
+                # If there was a mutual request (result > 0), remove buttons from friend's chat
+                if isinstance(result, int) and result > 0:
+                    try:
+                        await callback.bot.edit_message_reply_markup(
+                            chat_id=friend_id,
+                            message_id=result,
+                            reply_markup=None
+                        )
+                    except Exception: # Catch specific exceptions if possible, e.g., TelegramAPIError
+                        pass
+            except Exception: # Catch specific exceptions if possible, e.g., TelegramAPIError
                 pass
-        else:
+        else: # result is None, meaning the operation failed
             await callback.answer("Ошибка при добавлении.")
 
 
