@@ -86,13 +86,18 @@ async def reg_name(message: Message, state: FSMContext, user: dict | None):
     data = await state.get_data()
     edit_mode = data.get("edit_mode", False)
 
+    # Validate content type
+    if not message.text:
+        await message.answer("🚫 Пожалуйста, введите имя текстом. Фотографии и файлы не принимаются.")
+        return
+
     name = message.text.strip()
     
     if edit_mode and name == "Оставить без изменений":
         name = data.get("name")
     else:
         if not is_valid_name(name):
-            await message.answer("🚫 Не похоже на имя. Только буквы. Попробуйте еще раз.")
+            await message.answer("🚫 Имя должно содержать только буквы. Попробуйте еще раз.")
             return
 
     try:
@@ -130,13 +135,18 @@ async def reg_surname(message: Message, state: FSMContext, user: dict | None):
     data = await state.get_data()
     edit_mode = data.get("edit_mode", False)
 
+    # Validate content type
+    if not message.text:
+        await message.answer("🚫 Пожалуйста, введите фамилию текстом. Фотографии и файлы не принимаются.")
+        return
+
     surname = message.text.strip()
     
     if edit_mode and surname == "Оставить без изменений":
         surname = data.get("surname")
     else:
         if not is_valid_name(surname):
-            await message.answer("🚫 Не похоже на фамилию. Только буквы. Попробуйте еще раз.")
+            await message.answer("🚫 Фамилия должна содержать только буквы. Попробуйте еще раз.")
             return
 
     await state.update_data(surname=surname)
@@ -203,13 +213,18 @@ async def reg_age(message: Message, state: FSMContext, user: dict | None):
     data = await state.get_data()
     edit_mode = data.get("edit_mode", False)
 
+    # Validate content type
+    if not message.text:
+        await message.answer("🚫 Пожалуйста, введите возраст цифрами. Фотографии и файлы не принимаются.")
+        return
+
     age = message.text.strip()
     
     if edit_mode and age == "Оставить без изменений":
         age = data.get("age")
     else:
         if not is_valid_age(age):
-            await message.answer("🚫 Не похоже на возраст. Только цифры. Попробуйте еще раз.")
+            await message.answer("🚫 Ошибка. Возраст должен быть числом от 15 до 100.")
             return
         age = int(age)
 

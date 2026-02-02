@@ -6,7 +6,10 @@ def is_valid_name(text: str) -> bool:
     return bool(re.match(r'^[a-zA-Zа-яА-ЯёЁ\s-]+$', text))
 
 def is_valid_age(text: str) -> bool:
-    return text.isdigit() and 0 < int(text) < 120
+    if not text.isdigit():
+        return False
+    age = int(text)
+    return 15 <= age <= 100
 
 def escape_html(text: str) -> str:
     """Escape HTML special characters to prevent injection attacks."""
