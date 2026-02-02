@@ -37,6 +37,10 @@ async def communication_menu(message: Message):
 
 # --- Friends List ---
 
+from states.states import Registration, MessageState
+
+# ... imports ...
+
 @router.message(F.text == "Друзья")
 async def show_friends(message: Message, user: dict | None):
     if not user: 
@@ -50,13 +54,75 @@ async def show_friends(message: Message, user: dict | None):
         await message.answer("У вас пока нет друзей.")
         return
     
-    text = "<b>Ваши друзья:</b>\n"
+    await message.answer("<b>Ваши друзья:</b>", parse_mode=ParseMode.HTML)
+    
     for friend in friends:
         name = friend.get('name') or "Без имени"
         surname = friend.get('surname') or ""
-        text += f"• {name} {surname}\n"
+        text = f"👤 {name} {surname}"
+        
+        # Add 'Write Message' button if friend has tg_id
+        markup = None
+        if friend.get('tg_id'):
+            markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💬 Написать сообщение", callback_data=f"write_message_{friend['tg_id']}")]
+            ])
+        
+        await message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(lambda c: c.data.startswith("write_message_"))
+async def start_write_message(callback: types.CallbackQuery, state: FSMContext):
+    target_id = int(callback.data.split("_")[2])
     
-    await message.answer(text, parse_mode=ParseMode.HTML)
+    await state.update_data(target_id=target_id)
+    await state.set_state(MessageState.waiting_message)
+    
+    await callback.message.answer(
+        "Введите текст сообщения:",
+        reply_markup=types.ReplyKeyboardMarkup(
+            keyboard=[[types.KeyboardButton(text="Отмена")]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+    )
+    await callback.answer()
+
+
+@router.message(MessageState.waiting_message)
+async def send_friend_message(message: Message, state: FSMContext, user: dict | None):
+    if message.text == "Отмена":
+        await state.clear()
+        await message.answer("Отправка отменена.", reply_markup=get_user_main_menu())
+        return
+
+    data = await state.get_data()
+    target_id = data.get("target_id")
+    
+    if not target_id:
+        await message.answer("Ошибка: получаateľ не найден.")
+        await state.clear()
+        return
+        
+    sender_name = f"{user.get('name', '')} {user.get('surname', '')}".strip()
+    
+    try:
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="↩️ Ответить", callback_data=f"write_message_{user['tg_id']}")]
+        ])
+        
+        await message.bot.send_message(
+            target_id,
+            f"📩 <b>Сообщение от {sender_name}:</b>\n\n{message.text}",
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML
+        )
+        await message.answer("Сообщение отправлено! ✅", reply_markup=get_user_main_menu())
+    except Exception as e:
+        logging.error(f"Failed to send message: {e}")
+        await message.answer("❌ Не удалось отправить сообщение (возможно, пользователь заблокировал бота).")
+        
+    await state.clear()
 
 
 # --- Incoming Requests ---
@@ -296,7 +362,7 @@ async def show_search_results(message: Message, results: list, user: dict):
         await message.answer("Никого не найдено 😔", reply_markup=get_user_main_menu())
         return
         
-    await message.answer(f"Найдено: {len(results)}\nПоказываем топ-10:")
+    await message.answer(f"Найдено: {len(results)}\nПоказываем топ-10:", reply_markup=get_user_main_menu())
     
     for res in results[:10]:
         tg_id = res['tg_id']
@@ -349,9 +415,18 @@ async def add_friend_request(callback: types.CallbackQuery, user: dict | None):
             # Notify target
             try:
                 my_name = f"{user.get('name','')} {user.get('surname','')}".strip()
+                
+                markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ Принять", callback_data=f"friend_accept_{user['tg_id']}"),
+                        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"friend_decline_{user['tg_id']}")
+                    ]
+                ])
+                
                 await callback.bot.send_message(
                     target_id, 
-                    f"👋 Вам пришла заявка в друзья от {my_name}!"
+                    f"👋 Вам пришла заявка в друзья от {my_name}!",
+                    reply_markup=markup
                 )
             except:
                 pass

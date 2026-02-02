@@ -96,6 +96,10 @@ async def reg_name(message: Message, state: FSMContext, user: dict | None):
     if edit_mode and name == "Оставить без изменений":
         name = data.get("name")
     else:
+        if len(name) > 15:
+            await message.answer("🚫 Имя слишком длинное. Максимум 15 символов.")
+            return
+            
         if not is_valid_name(name):
             await message.answer("🚫 Имя должно содержать только буквы. Попробуйте еще раз.")
             return
@@ -145,6 +149,10 @@ async def reg_surname(message: Message, state: FSMContext, user: dict | None):
     if edit_mode and surname == "Оставить без изменений":
         surname = data.get("surname")
     else:
+        if len(surname) > 15:
+            await message.answer("🚫 Фамилия слишком длинная. Максимум 15 символов.")
+            return
+            
         if not is_valid_name(surname):
             await message.answer("🚫 Фамилия должна содержать только буквы. Попробуйте еще раз.")
             return

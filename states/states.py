@@ -26,3 +26,7 @@ class CreateEvent(StatesGroup):
     invite_friends = State()
     confirm = State()
     confirm_address = State()
+
+
+class MessageState(StatesGroup):
+    waiting_message = State()

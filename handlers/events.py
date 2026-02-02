@@ -383,7 +383,7 @@ async def view_friends_events(message: Message, user: dict | None):
         # Tuple format from repo:
         # id, name, date, time, address, interests, description, organizer_phone, is_participant
         try:
-            (eid, name, date, time, addr, interests, desc, org_phone, is_part) = event_row
+            (eid, name, date, time, addr, interests, desc, org_phone, lat, lon, is_part) = event_row
             
             event_dict = {
                 "name": name,
