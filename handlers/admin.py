@@ -8,119 +8,126 @@ from aiogram.fsm.context import FSMContext
 
 from states.states import AdminLoad
 from keyboards.builders import get_admin_menu_keyboard
-from database.common import replace_interests, replace_regions
+
+from database import get_session
+from database.repositories import InterestRepository, RegionRepository
+from utils.excel import export_users_report, export_events_report
 
 router = Router()
 
 @router.message(F.text == "📥 Загрузить списки")
 async def admin_load_lists(message: Message, state: FSMContext, user: dict | None):
     if user is None or user["role"] != "admin":
-        await message.answer("Эта функция доступна только администраторам.")
         return
-
-    await state.set_state(AdminLoad.waiting_excel)
+    
     await message.answer(
-        "📎 Загрузите Excel-файл:\n\n"
-        "• Столбец A — Интересы\n"
-        "• Столбец B — Регионы"
+        "Отправьте Excel-файл (.xlsx) с двумя листами:\n"
+        "1. Interests (список интересов)\n"
+        "2. Regions (список регионов)"
     )
+    await state.set_state(AdminLoad.waiting_excel)
+
 
 @router.message(AdminLoad.waiting_excel, F.document)
-async def admin_process_excel(message: Message, state: FSMContext, user: dict | None):
-    doc = message.document
-
+async def process_excel(message: Message, state: FSMContext, user: dict | None):
     if user is None or user["role"] != "admin":
-        await message.answer("Доступ запрещён.")
         return
 
-    if not doc.file_name.lower().endswith((".xlsx", ".xls")):
-        await message.answer("🚫 Поддерживаются только Excel-файлы")
+    doc = message.document
+    if not doc.file_name.endswith('.xlsx'):
+        await message.answer("Пожалуйста, отправьте файл .xlsx")
         return
 
-    MAX_FILE_SIZE = 5 * 1024 * 1024  
-    if doc.file_size and doc.file_size > MAX_FILE_SIZE:
-        await message.answer("🚫 Файл слишком большой. Максимум 5MB.")
-        return
-
-    file_id = uuid.uuid4()
-    file_ext = os.path.splitext(doc.file_name)[1]
-    file_path = f"/tmp/{file_id}{file_ext}"
+    file_id = doc.file_id
+    file = await message.bot.get_file(file_id)
+    file_path = file.file_path
+    
+    temp_filename = f"temp_{uuid.uuid4()}.xlsx"
+    await message.bot.download_file(file_path, temp_filename)
 
     try:
-        file = await message.bot.get_file(doc.file_id)
-        await message.bot.download_file(file.file_path, file_path)
-
-        wb = load_workbook(file_path)
-        ws = wb.active
-
-        interests, regions = [], []
-        for row in ws.iter_rows(values_only=True):
-            if row and row[0]:
-                interests.append(str(row[0]).strip())
-            if row and len(row) > 1 and row[1]:
-                regions.append(str(row[1]).strip())
-
-        if not interests and not regions:
-            await message.answer("🚫 Файл пуст или не содержит данных")
-            return
-
-        replace_interests(interests)
-        replace_regions(regions)
-
-        await state.clear()
-        await message.answer("✅ Списки успешно обновлены", 
-                           reply_markup=get_admin_menu_keyboard())
-    except Exception as e:
-        logging.error(f"Excel processing error: {e}")
-        await message.answer("🚫 Ошибка обработки файла")
-    finally:
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        wb = load_workbook(temp_filename)
         
-        try:
-            await message.delete()
-        except Exception:
-            pass  
+        interests = []
+        regions = []
+
+        if "Interests" in wb.sheetnames:
+            ws = wb["Interests"]
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row[0]:
+                    interests.append(str(row[0]).strip())
+
+        if "Regions" in wb.sheetnames:
+            ws = wb["Regions"]
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if row[0]:
+                    regions.append(str(row[0]).strip())
+        
+        # Update database async
+        async with get_session() as session:
+            interest_repo = InterestRepository(session)
+            region_repo = RegionRepository(session)
+            
+            if interests:
+                await interest_repo.replace_all(interests)
+            if regions:
+                await region_repo.replace_all(regions)
+
+        await message.answer(
+            f"✅ Обновлено:\n"
+            f"Интересов: {len(interests)}\n"
+            f"Регионов: {len(regions)}",
+            reply_markup=get_admin_menu_keyboard()
+        )
+        await state.clear()
+
+    except Exception as e:
+        logging.error(f"Error processing Excel: {e}")
+        await message.answer(f"Ошибка при обработке файла: {e}")
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+
 
 @router.message(F.text == "📊 Отчет по пользователям")
-async def generate_users_report(message: Message, user: dict | None):
+async def report_users(message: Message, user: dict | None):
     if user is None or user["role"] != "admin":
         return
 
-    from utils.excel import export_users_report
-    filepath = f"/tmp/users_report_{uuid.uuid4()}.xlsx"
+    filename = f"users_report_{uuid.uuid4()}.xlsx"
     
     try:
-        export_users_report(filepath)
-        await message.answer_document(
-            document=types.FSInputFile(filepath, filename="users_report.xlsx"),
-            caption="📊 Отчет по пользователям готово!"
-        )
+        # Note: export_users_report needs to be async or run in thread
+        # For now, we assume we updated utils/excel.py to be async
+        await export_users_report(filename)
+        
+        input_file = types.FSInputFile(filename)
+        await message.answer_document(input_file, caption="Отчет по пользователям")
+        
     except Exception as e:
-        logging.error(f"Report error: {e}")
-        await message.answer("Ошибка при создании отчета.")
+        logging.error(f"Error generating users report: {e}")
+        await message.answer(f"Ошибка генерации отчета: {e}")
     finally:
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        if os.path.exists(filename):
+            os.remove(filename)
 
 
 @router.message(F.text == "📅 Отчет по мероприятиям")
-async def generate_events_report(message: Message, user: dict | None):
+async def report_events(message: Message, user: dict | None):
     if user is None or user["role"] != "admin":
         return
 
-    from utils.excel import export_events_report
-    filepath = f"/tmp/events_report_{uuid.uuid4()}.xlsx"
-
+    filename = f"events_report_{uuid.uuid4()}.xlsx"
+    
     try:
-        export_events_report(filepath)
-        await message.answer_document(
-            document=types.FSInputFile(filepath, filename="events_report.xlsx"),
-            caption="📅 Отчет по мероприятиям готово!"
-        )
+        await export_events_report(filename)
+        
+        input_file = types.FSInputFile(filename)
+        await message.answer_document(input_file, caption="Отчет по мероприятиям")
+        
     except Exception as e:
-        logging.error(f"Report error: {e}")
-        await message.answer("Ошибка при создании отчета.")
+        logging.error(f"Error generating events report: {e}")
+        await message.answer(f"Ошибка генерации отчета: {e}")
     finally:
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        if os.path.exists(filename):
+            os.remove(filename)

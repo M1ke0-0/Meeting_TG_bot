@@ -1,8 +1,11 @@
 import logging
+import asyncio
 import re
+import uuid
+import os
 from datetime import datetime
 from aiogram import Router, F, types
-from aiogram.types import Message, ReplyKeyboardRemove, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 
@@ -12,127 +15,138 @@ from keyboards.builders import (
     get_user_main_menu, get_events_menu_keyboard, get_event_card_keyboard_optimized,
     get_my_event_card_keyboard, get_event_creation_keyboard
 )
-from database.events import (
-    create_event_db, get_friends_events, get_my_events, join_event_db, leave_event_db, 
-    get_event_card_text, get_event_by_id, get_event_participants
+from utils.validation import escape_html, is_valid_date, is_valid_time
+
+from database import get_session
+from database.repositories import (
+    EventRepository, ParticipantRepository, InviteRepository, 
+    UserRepository, InterestRepository, FriendRepository
 )
-from database.users import find_potential_friends
-from utils.validation import escape_html
-from utils.geocoding import geocode_address
 
 router = Router()
 
-@router.message(F.text == "🎉 Мероприятия")
-async def events_menu(message: Message, user: dict | None):
-    if user is None or not user["registered"]:
-        await message.answer("Сначала завершите регистрацию.")
-        return
+def mask_phone(phone: str) -> str:
+    """Mask phone number for privacy, showing only last 4 digits."""
+    if not phone or len(phone) < 4:
+        return "***"
+    return f"***{phone[-4:]}"
 
-    await message.answer(
-        "Раздел мероприятий 🎉",
-        reply_markup=get_events_menu_keyboard()
+async def get_event_card_text(event: dict, session=None):
+    """Формирует текст карточки мероприятия с экранированием HTML"""
+    safe_name = escape_html(event.get('name', ''))
+    safe_date = escape_html(event.get('date', ''))
+    safe_time = escape_html(event.get('time', ''))
+    safe_address = escape_html(event.get('address') or 'не указан')
+    safe_desc = escape_html(event.get('description') or 'нет описания')
+    safe_interests = escape_html(event.get('interests') or '')
+    
+    organizer_phone = event.get('organizer_phone')
+    masked_organizer = mask_phone(organizer_phone)
+    
+    # Try to get organizer name
+    organizer_name = masked_organizer
+    if session:
+        user_repo = UserRepository(session)
+        organizer = await user_repo.get_by_phone(organizer_phone)
+        if organizer:
+            organizer_name = f"{organizer.name or ''} {organizer.surname or ''}".strip() or masked_organizer
+    
+    safe_organizer = escape_html(organizer_name)
+
+    return (
+        f"📅 <b>{safe_name}</b>\n"
+        f"🕒 {safe_date} в {safe_time}\n"
+        f"📍 {safe_address}\n"
+        f"👤 Организатор: {safe_organizer}\n"
+        f"📋 {safe_desc}\n"
+        f"🏷 {safe_interests}"
     )
+
+
+@router.message(F.text == "🎉 Мероприятия")
+async def events_menu(message: Message):
+    await message.answer("Выберите действие:", reply_markup=get_events_menu_keyboard())
+
+# --- Creating Events ---
 
 @router.message(F.text == "Создать мероприятие")
-async def start_create_event(message: Message, state: FSMContext, user: dict | None):
-    if user is None or not user["registered"]:
-        await message.answer("Сначала зарегистрируйтесь.")
+async def create_event_start(message: Message, state: FSMContext, user: dict | None):
+    if not user:
+        await message.answer("Ошибка: пользователь не найден.")
         return
-
-    await state.set_state(CreateEvent.name)
+        
+    await state.clear()
     await message.answer(
-        "Введите название мероприятия:\n"
-        "(или нажмите /start для отмены)",
+        "Введите название мероприятия:", 
         reply_markup=get_event_creation_keyboard()
     )
+    await state.set_state(CreateEvent.name)
+
 
 @router.message(F.text == "❌ Отменить создание")
-async def cancel_event_creation_global(message: Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state and current_state.startswith("CreateEvent:"):
-        await state.clear()
-        await message.answer("Создание мероприятия отменено.", reply_markup=get_user_main_menu())
-    else:
-        await message.answer("Нет активного создания.", reply_markup=get_user_main_menu())
+async def cancel_creation(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Создание отменено.", reply_markup=get_events_menu_keyboard())
+
 
 @router.message(CreateEvent.name)
-async def process_event_name(message: Message, state: FSMContext):
-    name = message.text.strip()
-    if not name:
-        await message.answer("Название не может быть пустым.")
+async def event_name(message: Message, state: FSMContext):
+    if not message.text:
         return
-    await state.update_data(name=name)
+    await state.update_data(name=message.text)
+    await message.answer("Введите дату (ДД.ММ.ГГГГ):", reply_markup=get_event_creation_keyboard())
     await state.set_state(CreateEvent.date)
-    await message.answer("Введите дату начала (ДД.ММ.ГГГГ):")
+
 
 @router.message(CreateEvent.date)
-async def process_event_date(message: Message, state: FSMContext):
-    date_str = message.text.strip()
-
-    if not re.match(r'^\d{2}\.\d{2}\.\d{4}$', date_str):
-        await message.answer("Неверный формат. Пример: 15.03.2025")
+async def event_date(message: Message, state: FSMContext):
+    if not is_valid_date(message.text):
+        await message.answer("🚫 Неверный формат даты. Используйте ДД.ММ.ГГГГ (например, 25.12.2025)")
         return
-
-    try:
-        event_date = datetime.strptime(date_str, "%d.%m.%Y")
-    except ValueError:
-        await message.answer("Такая дата не существует. Попробуйте ещё раз.")
-        return
-
-    today = datetime.now().date()
-    if event_date.date() < today:
-        await message.answer("Нельзя создавать мероприятие в прошлом 😅")
-        return
-
-    await state.update_data(date=date_str, event_date_obj=event_date)
+    await state.update_data(date=message.text)
+    await message.answer("Введите время (ЧЧ:ММ):", reply_markup=get_event_creation_keyboard())
     await state.set_state(CreateEvent.time)
-    await message.answer("Введите время начала (ЧЧ:ММ):")
+
 
 @router.message(CreateEvent.time)
-async def process_event_time(message: Message, state: FSMContext):
-    time_str = message.text.strip()
-
-    if not re.match(r'^\d{2}:\d{2}$', time_str):
-        await message.answer("Неверный формат. Пример: 18:30")
+async def event_time(message: Message, state: FSMContext):
+    if not is_valid_time(message.text):
+        await message.answer("🚫 Неверный формат времени. Используйте ЧЧ:ММ (например, 18:30)")
         return
-
-    try:
-        hours, minutes = map(int, time_str.split(":"))
-        if not (0 <= hours <= 23 and 0 <= minutes <= 59):
-            raise ValueError
-    except ValueError:
-        await message.answer("Такого времени не бывает. Попробуйте ещё раз.")
-        return
-
-    data = await state.get_data()
-    event_date = data.get("event_date_obj")
-
-    now = datetime.now()
-    if event_date and event_date.date() == now.date():
-        event_datetime = datetime.combine(event_date.date(), datetime.strptime(time_str, "%H:%M").time())
-        if event_datetime <= now:
-            await message.answer("Нельзя создавать мероприятие в прошлом или в текущий момент.")
-            return
-
-    await state.update_data(time=time_str)
-    await state.set_state(CreateEvent.interests)
+    await state.update_data(time=message.text)
+    
+    # Fetch interests async
+    async with get_session() as session:
+        interest_repo = InterestRepository(session)
+        interests_list = await interest_repo.get_all_names()
+    
     await message.answer(
-        "Выберите интересы мероприятия (можно несколько):",
-        reply_markup=get_interests_keyboard([], edit_mode=False)
+        "Выберите интересы (теги) мероприятия:",
+        reply_markup=get_interests_keyboard(interests_list, [])
     )
+    await state.set_state(CreateEvent.interests)
+
 
 @router.callback_query(CreateEvent.interests)
-async def process_event_interests(callback: types.CallbackQuery, state: FSMContext):
+async def event_interests_callback(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     interests = data.get('interests', [])
 
     if callback.data == "done":
         if not interests:
-            await callback.message.answer("Укажите хотя бы один интерес.")
+            await callback.answer("🚫 Укажите хотя бы один интерес.")
             return
         await state.update_data(interests=interests)
         await state.set_state(CreateEvent.address)
-        await callback.message.answer("Введите адрес мероприятия:")
+        await callback.message.answer(
+            "Введите адрес мероприятия (или отправьте геолокацию 📎):",
+            reply_markup=get_event_creation_keyboard()
+        )
+        await callback.answer()
+        return
+
+    # Check for ignore edit profile callback
+    if callback.data == "keep_current": 
         await callback.answer()
         return
 
@@ -143,664 +157,471 @@ async def process_event_interests(callback: types.CallbackQuery, state: FSMConte
 
     await state.update_data(interests=interests)
     
-    from aiogram.exceptions import TelegramBadRequest
-    from contextlib import suppress
-
-    with suppress(TelegramBadRequest):
-        await callback.message.edit_reply_markup(reply_markup=get_interests_keyboard(interests))
+    # Fetch interests async
+    async with get_session() as session:
+        interest_repo = InterestRepository(session)
+        interests_list = await interest_repo.get_all_names()
+        
+    await callback.message.edit_reply_markup(
+        reply_markup=get_interests_keyboard(interests_list, interests)
+    )
     await callback.answer()
 
-@router.message(CreateEvent.address)
-async def process_event_address(message: Message, state: FSMContext):
-    address = message.text.strip()
-    
-    coords = await geocode_address(address)
-    
-    if not coords:
-        await message.answer(
-            "⚠️ Не удалось найти такой адрес.\n"
-            "Попробуйте ввести более точный адрес, например:\n"
-            "Москва, улица Авиамоторная, 8"
-        )
-        return
-    
-    lat, lon = coords
-    await state.update_data(address=address, latitude=lat, longitude=lon)
-    await state.set_state(CreateEvent.description)
-    await message.answer(
-        f"✅ Адрес найден!\n\nВведите описание мероприятия (можно пропустить):",
-        reply_markup=get_description_keyboard()
-    )
 
-@router.message(CreateEvent.description, F.text == "Пропустить")
-async def skip_event_description(message: Message, state: FSMContext):
-    await state.update_data(description=None)
-    await state.set_state(CreateEvent.photo)
-    await message.answer(
-        "Загрузите фото мероприятия (jpg, jpeg, png) или пропустите:",
-        reply_markup=get_photo_keyboard()
-    )
+from utils.geocoding import get_coordinates
+
+@router.message(CreateEvent.address)
+async def event_address(message: Message, state: FSMContext):
+    if message.location:
+        lat, lon = message.location.latitude, message.location.longitude
+        addr_str = f"Геолокация: {lat}, {lon}"
+        
+        # Try to reverse geocode if possible (optional, maybe later)
+        await state.update_data(address=addr_str, latitude=lat, longitude=lon)
+        
+        await message.answer(
+            "Введите описание мероприятия (или нажмите «Пропустить»):",
+            reply_markup=get_description_keyboard()
+        )
+        await state.set_state(CreateEvent.description)
+        
+    elif message.text:
+        # Try to geocode
+        await message.answer("🔍 Ищем адрес...")
+        
+        coordinates = await asyncio.to_thread(get_coordinates, message.text)
+        
+        if coordinates:
+            lat, lon, formatted_addr = coordinates
+            await state.update_data(
+                 temp_address=formatted_addr, 
+                 temp_lat=lat, 
+                 temp_lon=lon
+            )
+            
+            # Send location validation
+            kb = types.ReplyKeyboardMarkup(
+                keyboard=[
+                    [types.KeyboardButton(text="Да, верно")],
+                    [types.KeyboardButton(text="Нет, ввести заново")]
+                ],
+                resize_keyboard=True
+            )
+            
+            await message.bot.send_location(chat_id=message.chat.id, latitude=lat, longitude=lon)
+            await message.answer(
+                f"Мы нашли этот адрес:\n📍 {formatted_addr}\n\nЭто верное место?", 
+                reply_markup=kb
+            )
+            await state.set_state(CreateEvent.confirm_address)
+        else:
+            await message.answer(
+                "❌ Не удалось найти такой адрес.\nПопробуйте уточнить (например, добавьте город) или используйте кнопку «Отправить геолокацию» 📎."
+            )
+            return
+
+    else:
+        await message.answer("Введите адрес текстом или отправьте геометку.")
+        return
+
+
+@router.message(CreateEvent.confirm_address)
+async def confirm_address_handler(message: Message, state: FSMContext):
+    if message.text == "Да, верно":
+        data = await state.get_data()
+        
+        await state.update_data(
+            address=data.get("temp_address"),
+            latitude=data.get("temp_lat"),
+            longitude=data.get("temp_lon")
+        )
+        
+        await message.answer(
+            "Адрес сохранен!\nВведите описание мероприятия (или нажмите «Пропустить»):",
+            reply_markup=get_description_keyboard()
+        )
+        await state.set_state(CreateEvent.description)
+        
+    else:
+        await message.answer(
+            "Хорошо, введите адрес еще раз:",
+            reply_markup=get_event_creation_keyboard()
+        )
+        await state.set_state(CreateEvent.address)
+
+
 
 @router.message(CreateEvent.description)
-async def process_event_description(message: Message, state: FSMContext):
-    description = message.text.strip()
-    await state.update_data(description=description)
-    await state.set_state(CreateEvent.photo)
+async def event_description(message: Message, state: FSMContext):
+    text = message.text
+    if text == "Пропустить":
+        desc = ""
+    else:
+        desc = text
+
+    await state.update_data(description=desc)
     await message.answer(
-        "Загрузите фото мероприятия (jpg, jpeg, png) или пропустите:",
+        "Прикрепите фото/документ (или нажмите «Пропустить»):",
         reply_markup=get_photo_keyboard()
     )
+    await state.set_state(CreateEvent.photo)
 
-@router.message(CreateEvent.photo, F.photo)
-async def process_event_photo_media(message: Message, state: FSMContext):
-    photo = message.photo[-1]
-    await state.update_data(photo_file_id=photo.file_id, document_file_id=None)
-    await state.set_state(CreateEvent.invite_friends)
-    await show_invite_friends_list(message, state)
-
-@router.message(CreateEvent.photo, F.document)
-async def process_event_photo_document(message: Message, state: FSMContext):
-    doc = message.document
-    if not doc.mime_type or not doc.mime_type.startswith("image/"):
-        await message.answer("🚫 Файл не является изображением.")
-        return
-    if not doc.file_name.lower().endswith((".jpg", ".jpeg", ".png")):
-        await message.answer("🚫 Поддерживаются только JPG, JPEG, PNG.")
-        return
-    await state.update_data(document_file_id=doc.file_id, photo_file_id=None)
-    await state.set_state(CreateEvent.invite_friends)
-    await show_invite_friends_list(message, state)
-
-@router.message(CreateEvent.photo, F.text == "Пропустить")
-async def process_event_photo_skip(message: Message, state: FSMContext):
-    await state.update_data(photo_file_id=None, document_file_id=None)
-    await state.set_state(CreateEvent.invite_friends)
-    await show_invite_friends_list(message, state)
 
 @router.message(CreateEvent.photo)
-async def process_event_photo_invalid(message: Message, state: FSMContext):
-    await message.answer(
-        "🚫 Отправьте фото (как изображение или файл JPG/PNG) "
-        "или нажмите «Пропустить»"
-    )
-
-async def show_invite_friends_list(message: Message, state: FSMContext):
-    data = await state.get_data()
-    interests = data.get("interests", [])
-
-    from database.users import get_friends_db
-    friends_raw = get_friends_db(message.from_user.id)
-    
-    friends = []
-    for f in friends_raw:
-        f_interests = f['interests'].split(',') if f['interests'] else []
-        friend_dict = {
-            'tg_id': f['tg_id'],
-            'name': f['name'],
-            'surname': f['surname'],
-            'age': f['age'],
-            'interests': f_interests
-        }
-        friends.append(friend_dict)
-
-    if interests:
-        friends.sort(
-            key=lambda x: len(set(interests) & set(x['interests'])),
-            reverse=True
+async def event_photo(message: Message, state: FSMContext):
+    if message.text == "Пропустить":
+        await state.update_data(photo_file_id=None, document_file_id=None)
+    elif message.photo:
+        await state.update_data(
+            photo_file_id=message.photo[-1].file_id, 
+            document_file_id=None
         )
-
-    if not friends:
-        await message.answer(
-            "Пока нет подходящих друзей для приглашения 😔\n"
-            "Можно продолжить без приглашения.",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="Пропустить")]],
-                resize_keyboard=True,
-                one_time_keyboard=True
-            )
-        )
-        return
-
-    text = "Выберите друзей для приглашения:\n\n"
-    kb = InlineKeyboardMarkup(inline_keyboard=[])
-
-    for friend in friends:
-        name = f"{friend['name']} {friend['surname']}".strip()
-        age = friend['age'] if friend['age'] else "—"
-        row = f"[{name}][{age}]"
-        kb.inline_keyboard.append([
-            InlineKeyboardButton(
-                text=row,
-                callback_data=f"invite_friend_{friend['tg_id']}"
-            )
-        ])
-
-    kb.inline_keyboard.append([
-        InlineKeyboardButton(text="Пригласить всех", callback_data="invite_all"),
-        InlineKeyboardButton(text="Пропустить", callback_data="skip_invite")
-    ])
-
-    await message.answer(text, reply_markup=kb)
-
-@router.callback_query(lambda c: c.data.startswith("invite_friend_"))
-async def invite_single_friend(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
-    if user is None:
-        await callback.answer("Сессия истекла", show_alert=True)
-        return
-
-    try:
-        friend_tg_id = int(callback.data.split("_")[2])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных.", show_alert=True)
-        return
-        
-    data = await state.get_data()
-    invited_list = data.get("invited_list", [])
-    
-    from database.users import get_user_by_tg_id
-    friend = get_user_by_tg_id(friend_tg_id)
-    if not friend:
-        await callback.answer("Друг не найден.")
-        return
-        
-    if friend_tg_id in invited_list:
-        invited_list.remove(friend_tg_id)
-        await callback.answer(f"❌ {friend['name']} убран из списка приглашения")
+    elif message.document:
+        doc = message.document
+        if doc.mime_type and doc.mime_type.startswith("image/"):
+             await state.update_data(
+                 document_file_id=doc.file_id, 
+                 photo_file_id=None
+             )
+        else:
+            await message.answer("Пожалуйста, отправьте изображение (как фото или файл).")
+            return
     else:
-        invited_list.append(friend_tg_id)
-        await callback.answer(f"✅ {friend['name']} добавлен в список приглашения")
-        
-    await state.update_data(invited_list=invited_list)
-
-@router.callback_query(F.data == "invite_all")
-async def invite_all_friends(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
-    data = await state.get_data()
-    from database.users import get_friends_db
-    friends = get_friends_db(user['tg_id'])
+        await message.answer("Отправьте фото или нажмите «Пропустить».")
+        return
     
-    invited_list = [f['tg_id'] for f in friends]
-    await state.update_data(invited_list=invited_list)
-    await callback.answer(f"Все друзья ({len(invited_list)}) добавлены в список!", show_alert=True)
+    await state.set_state(CreateEvent.invite_friends)
     
-    await state.set_state(CreateEvent.confirm)
-    await show_event_preview(callback.message, state)
-
-@router.message(CreateEvent.invite_friends, F.text == "Пропустить")
-async def skip_invite_text(message: Message, state: FSMContext):
-    await state.set_state(CreateEvent.confirm)
-    await show_event_preview(message, state)
-
-@router.callback_query(CreateEvent.invite_friends, F.data == "skip_invite")
-async def skip_invite(callback: types.CallbackQuery, state: FSMContext):
-    await state.set_state(CreateEvent.confirm)
-    await show_event_preview(callback.message, state)
-    try:
-        await callback.message.delete()
-    except:
-        pass
-    await callback.answer("Приглашение пропущено")
-
-async def show_event_preview(message: Message, state: FSMContext):
-    data = await state.get_data()
-    text = f"<b>{data['name']}</b>\n"
-    text += f"Дата: {data['date']}\n"
-    text += f"Время: {data['time']}\n"
-    if data.get("interests"):
-        text += f"Интересы: {', '.join(data['interests'])}\n"
-    if data.get("address"):
-        text += f"Адрес: {data['address']}\n"
-    if data.get("description"):
-        text += f"\n{data['description']}\n"
-
-    kb = ReplyKeyboardMarkup(
+    # Ask about inviting friends
+    kb = types.ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Сохранить")],
-            [KeyboardButton(text="Отмена")],
+            [types.KeyboardButton(text="Да, пригласить")],
+            [types.KeyboardButton(text="Нет, создать так")]
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
+        one_time_keyboard=True
     )
+    await message.answer("Хотите пригласить друзей, которым это может быть интересно?", reply_markup=kb)
 
-    if data.get("photo_file_id"):
-        await message.answer_photo(
-            photo=data["photo_file_id"],
-            caption=text,
-            reply_markup=kb,
-            parse_mode=ParseMode.HTML
-        )
-    elif data.get("document_file_id"):
-        await message.answer_document(
-            document=data["document_file_id"],
-            caption=text,
-            reply_markup=kb,
-            parse_mode=ParseMode.HTML
-        )
-    else:
-        await message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)
 
-async def send_invites_for_event(bot, event_id, organizer_name, friend_ids, event_data):
-    from database.events import create_invite_db
-    from database.users import get_user_by_tg_id
-    
-    count = 0
-    for fid in friend_ids:
-        friend = get_user_by_tg_id(fid)
-        if not friend: continue
-        
-        if create_invite_db(event_id, friend['number']):
-            try:
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="✅ Пойти", callback_data=f"invite_accept_{event_id}"),
-                     InlineKeyboardButton(text="❌ Отказаться", callback_data=f"invite_decline_{event_id}")]
-                ])
-                
-                await bot.send_message(
-                    fid,
-                    f"👋 Привет! {organizer_name} приглашает тебя на мероприятие «{event_data['name']}»!\n\n"
-                    f"📅 Дата: {event_data['date']}\n"
-                    f"🕒 Время: {event_data['time']}\n"
-                    f"📍 Адрес: {event_data.get('address', '—')}\n\n"
-                    f"Примешь приглашение?",
-                    reply_markup=kb
-                )
-                count += 1
-            except Exception as e:
-                logging.error(f"Failed to send invite to {fid}: {e}")
-                
-    return count
-
-@router.message(CreateEvent.confirm, F.text == "Сохранить")
-async def save_event(message: Message, state: FSMContext, user: dict | None):
-    if user is None or not user["registered"]:
-        await message.answer("Сначала зарегистрируйтесь.")
-        await state.clear()
-        return
-
+@router.message(CreateEvent.invite_friends)
+async def event_invite_friends(message: Message, state: FSMContext, user: dict | None):
     data = await state.get_data()
+    invite = (message.text == "Да, пригласить")
     
-    if create_event_db(user["number"], data):
-        await message.answer("✅ Мероприятие успешно создано!", reply_markup=get_user_main_menu())
+    notifications_to_send = []
+    invited_count = 0
+    
+    async with get_session() as session:
+        event_repo = EventRepository(session)
+        event_id = await event_repo.create(user["number"], data)
         
-        invited_list = data.get("invited_list", [])
-        if invited_list:
-            from database.events import get_my_events
-            my_events, _ = get_my_events(user["number"])
-            if my_events:
-                last_event = my_events[0] 
-                event_id = last_event[0]
-                
-                count = await send_invites_for_event(
-                    message.bot, event_id, user['name'], invited_list, data
+        if not event_id:
+            await message.answer("Ошибка при создании мероприятия.", reply_markup=get_events_menu_keyboard())
+            await state.clear()
+            return
+            
+        if invite:
+            user_repo = UserRepository(session)
+            invite_repo = InviteRepository(session)
+            
+            # Find friends with matching interests
+            potential_friends = await user_repo.find_potential_friends(
+                user["number"], 
+                data.get("interests", [])
+            )
+            
+            for friend in potential_friends:
+                # Add invite
+                if await invite_repo.create_invite(event_id, friend["phone"]):
+                    invited_count += 1
+                    # Collect data for notification
+                    if friend.get("tg_id"):
+                        notifications_to_send.append(friend["tg_id"])
+    
+    # Send notifications after DB transaction is committed
+    if notifications_to_send:
+        markup = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="✅ Принять", callback_data=f"invite_accept_{event_id}")],
+            [types.InlineKeyboardButton(text="❌ Отклонить", callback_data=f"invite_decline_{event_id}")]
+        ])
+        
+        for tg_id in notifications_to_send:
+            try:
+                await message.bot.send_message(
+                    tg_id,
+                    f"Вас приглашают на мероприятие «{data['name']}»!",
+                    reply_markup=markup
                 )
-                if count > 0:
-                    await message.answer(f"📨 Приглашения отправлены: {count} шт.")
-    else:
-        await message.answer("❌ Ошибка при сохранении мероприятия.")
+            except Exception as e:
+                logging.error(f"Failed to send invite to tg_id {tg_id}: {e}")
 
+    await message.answer(
+        f"Мероприятие «{data['name']}» создано! 🎉\n" +
+        (f"Приглашено друзей: {invited_count}" if invite else ""),
+        reply_markup=get_events_menu_keyboard()
+    )
     await state.clear()
 
 
-@router.message(CreateEvent.confirm, F.text == "Отмена")
-async def cancel_event_creation(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Создание мероприятия отменено.", reply_markup=get_user_main_menu())
-
+# --- Viewing Events ---
 
 @router.message(F.text == "Мероприятия друзей")
-async def show_friends_events_handler(message: Message, user: dict | None):
-    if user is None or not user["registered"]:
-        await message.answer("Сначала зарегистрируйтесь.")
+async def view_friends_events(message: Message, user: dict | None):
+    if not user: 
         return
-
-    phone = user["number"]
-    events = get_friends_events(phone)
-
+    
+    async with get_session() as session:
+        event_repo = EventRepository(session)
+        events = await event_repo.get_friends_events(user["number"])
+    
     if not events:
-        await message.answer("Пока нет мероприятий от ваших друзей 😔\nДобавьте друзей, чтобы видеть их мероприятия!")
+        await message.answer("Ваши друзья пока не создали мероприятий.", reply_markup=get_events_menu_keyboard())
         return
 
-    for event in events:
-        event_dict = {
-            "id": event[0],
-            "name": event[1],
-            "date": event[2],
-            "time": event[3],
-            "address": event[4],
-            "interests": event[5],
-            "description": event[6],
-            "organizer_phone": event[7],
-            "is_participant": bool(event[8])
-        }
-        text = await get_event_card_text(event_dict)
-        
-        kb = get_event_card_keyboard_optimized(
-            event_dict["id"], 
-            phone, 
-            event_dict["organizer_phone"],
-            event_dict["is_participant"]
-        )
-
-        await message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)
+    for event_row in events:
+        # Tuple format from repo:
+        # id, name, date, time, address, interests, description, organizer_phone, is_participant
+        try:
+            (eid, name, date, time, addr, interests, desc, org_phone, is_part) = event_row
+            
+            event_dict = {
+                "name": name,
+                "date": date,
+                "time": time,
+                "address": addr,
+                "description": desc,
+                "interests": interests,
+                "organizer_phone": org_phone
+            }
+            
+            async with get_session() as session:
+                caption = await get_event_card_text(event_dict, session)
+            
+            kb = get_event_card_keyboard_optimized(
+                event_id=eid,
+                user_phone=user["number"],
+                organizer_phone=org_phone,
+                is_participant=bool(is_part)
+            )
+            
+            await message.answer(caption, reply_markup=kb, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logging.error(f"Error displaying event {event_row}: {e}")
 
 
 @router.message(F.text == "Мои мероприятия")
-async def show_my_events_handler(message: Message, user: dict | None):
-    if user is None or not user["registered"]:
-        await message.answer("Сначала зарегистрируйтесь.")
+async def view_my_events(message: Message, user: dict | None):
+    if not user: 
         return
-
-    phone = user["number"]
-    organized, participated = get_my_events(phone)
-
+    
+    async with get_session() as session:
+        event_repo = EventRepository(session)
+        organized, participated = await event_repo.get_my_events(user["number"])
+    
     if not organized and not participated:
-        await message.answer("У вас пока нет мероприятий 😔")
+        await message.answer("Вы пока не создали и не участвуете ни в одном мероприятии.", reply_markup=get_events_menu_keyboard())
         return
 
-    if organized:
-        await message.answer("📌 Мои мероприятия (организатор):")
-        for event in organized:
-            event_dict = {
-                "id": event[0], "name": event[1], "date": event[2], 
-                "time": event[3], "address": event[4], "interests": event[5], 
-                "description": event[6], "organizer_phone": event[7]
-            }
-            text = await get_event_card_text(event_dict)
-            kb = get_my_event_card_keyboard(event_dict["id"], is_organizer=True)
-            await message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)
+    async with get_session() as session:
+        if organized:
+            await message.answer("<b>Вы организатор:</b>", parse_mode=ParseMode.HTML)
+            for e_row in organized:
+                # id, name, date, time, address, interests, desc, org_phone, is_org, is_part
+                eid = e_row[0]
+                event_dict = {
+                    "name": e_row[1], "date": e_row[2], "time": e_row[3],
+                    "address": e_row[4], "interests": e_row[5], "description": e_row[6],
+                    "organizer_phone": e_row[7]
+                }
+                caption = await get_event_card_text(event_dict, session)
+                kb = get_my_event_card_keyboard(eid, is_organizer=True)
+                await message.answer(caption, reply_markup=kb, parse_mode=ParseMode.HTML)
+
+        if participated:
+            await message.answer("<b>Вы участвуете:</b>", parse_mode=ParseMode.HTML)
+            for e_row in participated:
+                eid = e_row[0]
+                event_dict = {
+                    "name": e_row[1], "date": e_row[2], "time": e_row[3],
+                    "address": e_row[4], "interests": e_row[5], "description": e_row[6],
+                    "organizer_phone": e_row[7]
+                }
+                caption = await get_event_card_text(event_dict, session)
+                kb = get_my_event_card_keyboard(eid, is_organizer=False)
+                await message.answer(caption, reply_markup=kb, parse_mode=ParseMode.HTML)
+
+
+# --- Event Actions ---
+
+@router.callback_query(F.data.startswith("join_event_"))
+async def join_event_handler(callback: types.CallbackQuery, user: dict | None):
+    event_id = int(callback.data.split("_")[2])
+    
+    async with get_session() as session:
+        part_repo = ParticipantRepository(session)
+        success, msg = await part_repo.join_event(event_id, user["number"])
+        
+        if success:
+            await callback.answer("Вы успешно записались!", show_alert=True)
+            # Update message to show "Leave" button
+            event_repo = EventRepository(session)
+            event = await event_repo.get_by_id(event_id)
+            if event:
+                kb = get_event_card_keyboard_optimized(
+                    event_id, user["number"], event["organizer_phone"], is_participant=True
+                )
+                await callback.message.edit_reply_markup(reply_markup=kb)
+        else:
+            if msg == "already_joined":
+                await callback.answer("Вы уже участвуете.", show_alert=True)
+            else:
+                await callback.answer("Ошибка при записи.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("leave_event_"))
+async def leave_event_handler(callback: types.CallbackQuery, user: dict | None):
+    event_id = int(callback.data.split("_")[2])
+    
+    async with get_session() as session:
+        part_repo = ParticipantRepository(session)
+        success, msg, organizer_phone = await part_repo.leave_event(event_id, user["number"])
+        
+        if success:
+            await callback.answer("Вы отказались от участия.", show_alert=True)
             
-    if participated:
-        await message.answer("🎟️ Мои мероприятия (участник):")
-        for event in participated:
-            event_dict = {
-                "id": event[0], "name": event[1], "date": event[2], 
-                "time": event[3], "address": event[4], "interests": event[5], 
-                "description": event[6], "organizer_phone": event[7],
-                "is_participant": bool(event[9])
-            }
-            text = await get_event_card_text(event_dict)
-            kb = get_my_event_card_keyboard(event_dict["id"], is_organizer=False)
-            await message.answer(text, reply_markup=kb, parse_mode=ParseMode.HTML)
-
-@router.callback_query(lambda c: c.data.startswith("join_event_"))
-async def join_event(callback: types.CallbackQuery, user: dict | None):
-    if user is None or not user["registered"]:
-        await callback.answer("Сначала зарегистрируйтесь.", show_alert=True)
-        return
-
-    try:
-        event_id = int(callback.data.split("_")[2])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных.", show_alert=True)
-        return
-        
-    phone = user["number"]
-
-    success, message = join_event_db(event_id, phone)
-    if success:
-         await callback.answer("Вы успешно записались! 🎉", show_alert=True)
-         await callback.message.edit_reply_markup(reply_markup=None)
-    elif message == "already_joined":
-         await callback.answer("Вы уже участвуете в этом мероприятии!", show_alert=True)
-    else:
-         await callback.answer("Ошибка при записи", show_alert=True)
-
-
-@router.callback_query(lambda c: c.data.startswith("leave_event_"))
-async def leave_event(callback: types.CallbackQuery, user: dict | None):
-    if user is None or not user["registered"]:
-        await callback.answer("Сначала зарегистрируйтесь.", show_alert=True)
-        return
-
-    try:
-        event_id = int(callback.data.split("_")[2])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных.", show_alert=True)
-        return
-        
-    phone = user["number"]
-
-    success, msg, organizer_phone = leave_event_db(event_id, phone)
-
-    if success:
-        await callback.answer("Вы отказались от участия", show_alert=True)
-        new_kb = get_event_card_keyboard_optimized(event_id, phone, organizer_phone, False)
-        if new_kb:
-            await callback.message.edit_reply_markup(reply_markup=new_kb)
+            # Notify organizer if possible
+            if organizer_phone:
+                user_repo = UserRepository(session)
+                organizer = await user_repo.get_by_phone(organizer_phone)
+                
+                if organizer and organizer.tg_id:
+                    try:
+                        participant_name = f"{user.get('name', '')} {user.get('surname', '')}".strip()
+                        await callback.bot.send_message(
+                            organizer.tg_id,
+                            f"⚠️ Пользователь {participant_name} отказался от участия в вашем мероприятии."
+                        )
+                    except Exception as e:
+                        logging.error(f"Failed to notify organizer: {e}")
+            
+            # Update card
+            event_repo = EventRepository(session)
+            event = await event_repo.get_by_id(event_id)
+            if event:
+                kb = get_event_card_keyboard_optimized(
+                    event_id, user["number"], event["organizer_phone"], is_participant=False
+                )
+                await callback.message.edit_reply_markup(reply_markup=kb)
+            else:
+                await callback.message.delete()
         else:
-            await callback.message.edit_reply_markup(reply_markup=None)
-    elif msg == "not_found":
-        await callback.answer("Мероприятие не найдено!", show_alert=True)
-    elif msg == "not_participating":
-        await callback.answer("Вы не участвуете в этом мероприятии!", show_alert=True)
+            await callback.answer("Ошибка при выходе.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("view_map_"))
+async def view_map(callback: types.CallbackQuery):
+    event_id = int(callback.data.split("_")[2])
+    
+    async with get_session() as session:
+        event_repo = EventRepository(session)
+        event = await event_repo.get_by_id(event_id)
+        
+    if event and event.get("latitude") and event.get("longitude"):
+        await callback.message.answer_location(
+            latitude=event["latitude"], 
+            longitude=event["longitude"]
+        )
+        await callback.answer()
     else:
-        await callback.answer("Ошибка при отказе", show_alert=True)
+        await callback.answer("Координаты не указаны.", show_alert=True)
 
 
-@router.callback_query(lambda c: c.data.startswith("view_map_"))
-async def view_on_map(callback: types.CallbackQuery, user: dict | None):
-    """Shows event name, address, and venue with coordinates per TZ."""
-    try:
-        event_id = int(callback.data.split("_")[2])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных.", show_alert=True)
-        return
+@router.callback_query(F.data.startswith("view_participants_"))
+async def view_participants(callback: types.CallbackQuery):
+    event_id = int(callback.data.split("_")[2])
     
-    event = get_event_by_id(event_id)
-    if not event:
-        await callback.answer("Мероприятие не найдено!", show_alert=True)
-        return
-    
-    safe_name = escape_html(event.get('name', 'Мероприятие'))
-    safe_address = escape_html(event.get('address', 'Адрес не указан'))
-    
-    text = f"<b>{safe_name}</b>\n📍 {safe_address}"
-    await callback.message.answer(text, parse_mode=ParseMode.HTML)
-    
-    lat = event.get('latitude')
-    lon = event.get('longitude')
-    
-    if not lat or not lon:
-        address = event.get('address', '')
-        coords = await geocode_address(address)
-        if coords:
-            lat, lon = coords
-        else:
-            lat, lon = 55.7558, 37.6173
-            await callback.message.answer("⚠️ Не удалось определить координаты. Показана Москва.")
-    
-    await callback.message.answer_venue(
-        latitude=lat,
-        longitude=lon,
-        title=event.get('name', 'Мероприятие'),
-        address=event.get('address', 'Адрес не указан')
-    )
-    await callback.answer()
-
-
-@router.callback_query(lambda c: c.data.startswith("view_participants_"))
-async def view_participants(callback: types.CallbackQuery, user: dict | None):
-    try:
-        event_id = int(callback.data.split("_")[2])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных.", show_alert=True)
-        return
-    
-    participants = get_event_participants(event_id)
-    
+    async with get_session() as session:
+        part_repo = ParticipantRepository(session)
+        participants = await part_repo.get_participants(event_id)
+        
     if not participants:
-        await callback.answer("Пока нет участников 😔", show_alert=True)
+        await callback.answer("Участников пока нет.", show_alert=True)
         return
-    
-    lines = ["<b>👥 Список участников:</b>\n"]
-    for name, surname, age in participants:
-        safe_name = escape_html(name or '')
-        safe_surname = escape_html(surname or '')
-        age_str = str(age) if age else ''
-        lines.append(f"• {safe_name} {safe_surname}, {age_str}")
-    
-    text = "\n".join(lines)
+        
+    text = "👥 <b>Участники:</b>\n\n"
+    for p in participants:
+        name, surname, age = p
+        text += f"• {name} {surname or ''}"
+        if age:
+            text += f" ({age} лет)"
+        text += "\n"
+        
     await callback.message.answer(text, parse_mode=ParseMode.HTML)
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data.startswith("invite_to_event_"))
-async def start_invite_to_existing_event(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
-    """Handler for inviting friends to an already created event."""
-    if user is None:
-        await callback.answer("Сессия истекла", show_alert=True)
-        return
-        
-    try:
-        event_id = int(callback.data.split("_")[3])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных.", show_alert=True)
-        return
-        
-    from database.events import get_event_by_id
-    event = get_event_by_id(event_id)
+@router.callback_query(F.data.startswith("invite_to_event_"))
+async def invite_users_to_event(callback: types.CallbackQuery, user: dict | None):
+    # Retrieve event to get interests etc
+    event_id = int(callback.data.split("_")[3])
     
-    if not event:
-        await callback.answer("Мероприятие не найдено", show_alert=True)
-        return
+    async with get_session() as session:
+        event_repo = EventRepository(session)
+        event = await event_repo.get_by_id(event_id)
         
-    await state.update_data(
-        invite_event_id=event_id,
-        name=event['name'],
-        date=event['date'],
-        time=event['time'],
-        address=event['address'] if event['address'] else "не указан",
-        interests=event['interests'].split(',') if event['interests'] else []
-    )
-    
-    from database.users import get_friends_db
-    from database.events import get_event_participant_ids
-    
-    friends_raw = get_friends_db(callback.from_user.id)
-    existing_participant_ids = get_event_participant_ids(event_id)
-    
-    friends = []
-    for f in friends_raw:
-        if f['tg_id'] in existing_participant_ids:
-            continue
-            
-        f_interests = f['interests'].split(',') if f['interests'] else []
-        friend_dict = {
-            'tg_id': f['tg_id'],
-            'name': f['name'],
-            'surname': f['surname'],
-            'age': f['age'],
-            'interests': f_interests
-        }
-        friends.append(friend_dict)
-        
-    if not friends:
-        await callback.answer("У вас пока нет друзей для приглашения 😔", show_alert=True)
-        return
-        
-    text = "Choose friends to invite:\n\n"
-    kb = InlineKeyboardMarkup(inline_keyboard=[])
-
-    for friend in friends:
-        name = f"{friend['name']} {friend['surname']}".strip()
-        age = friend['age'] if friend['age'] else "—"
-        row = f"[{name}][{age}]"
-        
-        kb.inline_keyboard.append([
-            InlineKeyboardButton(
-                text=row,
-                callback_data=f"send_invite_{event_id}_{friend['tg_id']}"
-            )
-        ])
-
-    kb.inline_keyboard.append([
-        InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_events_list")
-    ])
-    
-    await callback.message.answer("Выберите друга для приглашения:", reply_markup=kb)
-    await callback.answer()
-
-
-@router.callback_query(lambda c: c.data.startswith("send_invite_"))
-async def send_invite_existing(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
-    """Handle sending invitation to a specific friend for an existing event."""
-    if user is None:
-        await callback.answer("Сессия истекла")
-        return
-
-    try:
-        parts = callback.data.split("_")
-        event_id = int(parts[2])
-        friend_tg_id = int(parts[3])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка данных.")
-        return
-        
-    data = await state.get_data()
-    if not data.get('name'):
-        from database.events import get_event_by_id
-        event = get_event_by_id(event_id)
-        if event:
-            event_name = event['name']
-            event_date = event['date']
-            event_time = event['time']
-            event_addr = event['address']
-        else:
-            await callback.answer("Ошибка: данные мероприятия не найдены")
+        if not event:
+            await callback.answer("Мероприятие не найдено")
             return
-    else:
-        event_name = data.get('name')
-        event_date = data.get('date')
-        event_time = data.get('time')
-        event_addr = data.get('address')
-        
-    safe_user_name = user.get('name', 'Пользователь')
+            
+        # Find potential friends
+        interests = event.get('interests', '').split(",") if event.get('interests') else []
+        user_repo = UserRepository(session)
+        potential = await user_repo.find_potential_friends(user['number'], interests)
     
-    from database.events import create_invite_db
-    from database.users import get_user_by_tg_id
-    
-    friend = get_user_by_tg_id(friend_tg_id)
-    if not friend:
-        await callback.answer("Друг не найден", show_alert=True)
+    if not potential:
+        await callback.answer("Подходящих пользователей не найдено.", show_alert=True)
         return
+        
+    # Send invites
+    invited_count = 0
+    async with get_session() as session:
+        invite_repo = InviteRepository(session)
+        
+        for friend in potential:
+            if await invite_repo.create_invite(event_id, friend["phone"]):
+                invited_count += 1
+                try:
+                    markup = types.InlineKeyboardMarkup(inline_keyboard=[
+                        [types.InlineKeyboardButton(text="✅ Принять", callback_data=f"invite_accept_{event_id}")],
+                        [types.InlineKeyboardButton(text="❌ Отклонить", callback_data=f"invite_decline_{event_id}")]
+                    ])
+                    if friend.get("tg_id"):
+                        await callback.bot.send_message(
+                            friend["tg_id"],
+                            f"Вас приглашают на мероприятие «{event['name']}»!",
+                            reply_markup=markup
+                        )
+                except Exception as e:
+                    pass
 
-    invited = create_invite_db(event_id, friend['number'])
-    
-    if invited:
-        try:
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Пойти", callback_data=f"invite_accept_{event_id}"),
-                 InlineKeyboardButton(text="❌ Отказаться", callback_data=f"invite_decline_{event_id}")]
-            ])
+    await callback.answer(f"Приглашения отправлены: {invited_count}", show_alert=True)
 
-            await callback.bot.send_message(
-                friend_tg_id,
-                f"👋 Привет! {safe_user_name} приглашает тебя на мероприятие «{event_name}»!\n\n"
-                f"📅 Дата: {event_date}\n"
-                f"🕒 Время: {event_time}\n"
-                f"📍 Адрес: {event_addr}\n\n"
-                f"Примешь приглашение?",
-                reply_markup=kb
-            )
-            await callback.answer("Приглашение отправлено!", show_alert=True)
-        except Exception as e:
-            logging.error(f"Error sending invite: {e}")
-            await callback.answer("Не удалось отправить (возможно, бот заблокирован пользователем)", show_alert=True)
-    else:
-        await callback.answer("Ошибка создания приглашения", show_alert=True)
 
 @router.callback_query(lambda c: c.data.startswith("invite_accept_"))
 async def process_invite_accept(callback: types.CallbackQuery, user: dict | None):
     if user is None:
-        await callback.answer("Ошибка: пользователь не найден.", show_alert=True)
+        await callback.answer("Ошибка пользователя.", show_alert=True)
         return
         
     try:
         event_id = int(callback.data.split("_")[2])
-    except (ValueError, IndexError):
-         await callback.answer("Ошибка данных", show_alert=True)
-         return
+    except:
+        return
     
-    from database.events import join_event_db
-    success, reason = join_event_db(event_id, user['number'])
+    async with get_session() as session:
+        part_repo = ParticipantRepository(session)
+        success, reason = await part_repo.join_event(event_id, user['number'])
     
     if success:
         await callback.message.edit_text(
@@ -809,8 +630,11 @@ async def process_invite_accept(callback: types.CallbackQuery, user: dict | None
             parse_mode=ParseMode.HTML
         )
         
-        from database.events import get_event_by_id
-        event = get_event_by_id(event_id)
+        # Notify organizer
+        async with get_session() as session:
+            event_repo = EventRepository(session)
+            event = await event_repo.get_by_id(event_id)
+            
         if event and event.get('organizer_tg_id'):
             organizer_id = event['organizer_tg_id']
             if organizer_id != user['tg_id']:
@@ -844,8 +668,12 @@ async def process_invite_decline(callback: types.CallbackQuery, user: dict | Non
     except:
         return
     
-    from database.events import update_invite_status_db, get_event_by_id
-    update_invite_status_db(event_id, user['number'], 'declined')
+    async with get_session() as session:
+        invite_repo = InviteRepository(session)
+        await invite_repo.update_status(event_id, user['number'], 'declined')
+        
+        event_repo = EventRepository(session)
+        event = await event_repo.get_by_id(event_id)
     
     await callback.message.edit_text(
         f"{callback.message.text}\n\n❌ <b>Вы отклонили приглашение.</b>",
@@ -853,7 +681,6 @@ async def process_invite_decline(callback: types.CallbackQuery, user: dict | Non
         parse_mode=ParseMode.HTML
     )
 
-    event = get_event_by_id(event_id)
     if event and event.get('organizer_tg_id'):
         organizer_id = event['organizer_tg_id']
         if organizer_id != user['tg_id']:

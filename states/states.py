@@ -25,3 +25,4 @@ class CreateEvent(StatesGroup):
     photo = State()
     invite_friends = State()
     confirm = State()
+    confirm_address = State()

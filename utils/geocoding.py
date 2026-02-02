@@ -1,41 +1,19 @@
-"""
-Geocoding utilities for converting addresses to coordinates.
-Uses Nominatim (OpenStreetMap) free API.
-"""
-import aiohttp
-import logging
+from geopy.geocoders import Nominatim
+from typing import Optional, Tuple
 
-async def geocode_address(address: str) -> tuple[float, float] | None:
+def get_coordinates(address: str) -> Optional[Tuple[float, float, str]]:
     """
-    Convert text address to latitude/longitude using Nominatim API.
-    Returns (lat, lon) tuple or None if geocoding fails.
+    Geocode an address string to coordinates using Nominatim.
+    Returns (latitude, longitude, formatted_address) or None if not found.
     """
-    if not address:
-        return None
-    
     try:
-        url = "https://nominatim.openstreetmap.org/search"
-        params = {
-            "q": address,
-            "format": "json",
-            "limit": 1,
-            "countrycodes": "ru"  
-        }
-        headers = {
-            "User-Agent": "TelegramBot/1.0"  
-        }
+        # User-Agent is required by Nominatim
+        geolocator = Nominatim(user_agent="anty_test_bot_v1")
+        location = geolocator.geocode(address)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, headers=headers, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if data:
-                        lat = float(data[0]["lat"])
-                        lon = float(data[0]["lon"])
-                        return (lat, lon)
-                else:
-                    logging.warning(f"Geocoding API returned status {response.status}")
+        if location:
+            return location.latitude, location.longitude, location.address
         return None
     except Exception as e:
-        logging.error(f"Geocoding error for '{address}': {e}")
+        print(f"Geocoding error: {e}")
         return None

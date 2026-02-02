@@ -1,5 +1,5 @@
 from aiogram import Router, F, types
-from aiogram.types import Message, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
@@ -7,8 +7,13 @@ from aiogram.enums import ParseMode
 from states.states import Registration
 from keyboards.builders import (
     get_user_main_menu, get_admin_menu_keyboard, get_start_keyboard,
-    get_resume_registration_keyboard, get_skip_edit_keyboard
+    get_resume_registration_keyboard, get_skip_edit_keyboard,
+    get_gender_keyboard, get_region_keyboard, get_interests_keyboard,
+    get_photo_keyboard, get_location_keyboard, get_edit_profile_menu
 )
+
+from database import get_session
+from database.repositories import RegionRepository, InterestRepository
 
 router = Router()
 
@@ -147,7 +152,6 @@ async def start_edit_profile(callback: types.CallbackQuery, state: FSMContext, u
         single_edit=False 
     )
     
-    from keyboards.builders import get_edit_profile_menu
     await callback.message.answer(
         "Что вы хотите изменить?",
         reply_markup=get_edit_profile_menu()
@@ -194,7 +198,6 @@ async def edit_field_gender(callback: types.CallbackQuery, state: FSMContext, us
     await state.set_state(Registration.gender)
     data = await state.get_data()
     current = data.get("gender", "не указано")
-    from keyboards.builders import get_gender_keyboard
     await callback.message.answer(
         f"Текущий пол: {current}\nВыберите пол:",
         reply_markup=get_gender_keyboard(edit_mode=True)
@@ -219,10 +222,15 @@ async def edit_field_region(callback: types.CallbackQuery, state: FSMContext, us
     await state.set_state(Registration.region)
     data = await state.get_data()
     current = data.get("region", "не указано")
-    from keyboards.builders import get_region_keyboard
+    
+    # Fetch regions async
+    async with get_session() as session:
+        region_repo = RegionRepository(session)
+        regions_list = await region_repo.get_all_names()
+
     await callback.message.answer(
         f"Текущий регион: {current}\nВыберите регион:",
-        reply_markup=get_region_keyboard(edit_mode=True)
+        reply_markup=get_region_keyboard(regions_list, edit_mode=True)
     )
     await callback.answer()
 
@@ -233,10 +241,15 @@ async def edit_field_interests(callback: types.CallbackQuery, state: FSMContext,
     data = await state.get_data()
     current_list = data.get("interests", [])
     current = ", ".join(current_list) if current_list else "не указаны"
-    from keyboards.builders import get_interests_keyboard
+    
+    # Fetch interests async
+    async with get_session() as session:
+        interest_repo = InterestRepository(session)
+        interests_list = await interest_repo.get_all_names()
+    
     await callback.message.answer(
         f"Текущие интересы: {current}\nВыберите новые интересы:",
-        reply_markup=get_interests_keyboard(current_list, edit_mode=True)
+        reply_markup=get_interests_keyboard(interests_list, current_list, edit_mode=True)
     )
     await callback.answer()
 
@@ -246,7 +259,6 @@ async def edit_field_photo(callback: types.CallbackQuery, state: FSMContext, use
     await state.set_state(Registration.photo)
     data = await state.get_data()
     current = "есть" if data.get("photo_file_id") or data.get("document_file_id") else "нет"
-    from keyboards.builders import get_photo_keyboard
     await callback.message.answer(
         f"Текущее фото: {current}\nЗагрузите новое фото:",
         reply_markup=get_photo_keyboard(edit_mode=True)
@@ -259,7 +271,6 @@ async def edit_field_location(callback: types.CallbackQuery, state: FSMContext, 
     await state.set_state(Registration.location)
     data = await state.get_data()
     current = "есть" if data.get("location_lat") else "нет"
-    from keyboards.builders import get_location_keyboard
     await callback.message.answer(
         f"Текущее местоположение: {current}\nОтправьте новое местоположение:",
         reply_markup=get_location_keyboard(edit_mode=True)

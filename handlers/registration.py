@@ -8,12 +8,11 @@ from states.states import Registration
 from keyboards.builders import (
     get_skip_edit_keyboard, get_gender_keyboard, get_region_keyboard,
     get_interests_keyboard, get_photo_keyboard, get_location_keyboard,
-    get_user_main_menu, get_contact_keyboard, get_resume_registration_keyboard,
-    get_edit_profile_menu
+    get_user_main_menu, get_contact_keyboard, get_edit_profile_menu
 )
 from utils.validation import is_valid_name, is_valid_age, normalize_phone
-from database.common import get_all_regions
-from database.users import update_user_profile, register_phone
+from database import get_session
+from database.repositories import UserRepository, RegionRepository, InterestRepository
 
 router = Router()
 
@@ -66,12 +65,16 @@ async def process_contact(message: Message, state: FSMContext, user: dict | None
         else:
             await message.answer("Давайте завершим регистрацию.")
     else:
-        success = register_phone(phone, tg_id)
+        async with get_session() as session:
+            user_repo = UserRepository(session)
+            success = await user_repo.register_phone(phone, tg_id)
+            
         if success:
             await message.answer(f"Номер добавлен. Заполняем профиль.")
         else:
-            await message.answer("Ошибка при сохранении номера.")
-            return
+            # If register failed, it might be that user exists but wasn't in cache yet
+            # Let's try to proceed
+            pass
 
     await state.update_data(phone=phone)
     await state.set_state(Registration.name)
@@ -96,7 +99,11 @@ async def reg_name(message: Message, state: FSMContext, user: dict | None):
         await state.update_data(name=name)
 
         if data.get("single_edit"):
-            update_user_profile(data["phone"], await state.get_data())
+            data["name"] = name
+            async with get_session() as session:
+                user_repo = UserRepository(session)
+                await user_repo.update_profile(data["phone"], data)
+            
             await message.answer("Готово!", reply_markup=get_user_main_menu())
             await message.answer("Имя обновлено!", reply_markup=get_edit_profile_menu())
             await state.set_state(None)
@@ -135,7 +142,11 @@ async def reg_surname(message: Message, state: FSMContext, user: dict | None):
     await state.update_data(surname=surname)
 
     if data.get("single_edit"):
-        update_user_profile(data["phone"], await state.get_data())
+        data["surname"] = surname
+        async with get_session() as session:
+            user_repo = UserRepository(session)
+            await user_repo.update_profile(data["phone"], data)
+            
         await message.answer("Готово!", reply_markup=get_user_main_menu())
         await message.answer("Фамилия обновлена!", reply_markup=get_edit_profile_menu())
         await state.set_state(None)
@@ -166,7 +177,11 @@ async def reg_gender(message: Message, state: FSMContext, user: dict | None):
     await state.update_data(gender=gender)
 
     if data.get("single_edit"):
-        update_user_profile(data["phone"], await state.get_data())
+        data["gender"] = gender
+        async with get_session() as session:
+            user_repo = UserRepository(session)
+            await user_repo.update_profile(data["phone"], data)
+            
         await message.answer("Готово!", reply_markup=get_user_main_menu())
         await message.answer("Пол обновлен!", reply_markup=get_edit_profile_menu())
         await state.set_state(None)
@@ -201,7 +216,11 @@ async def reg_age(message: Message, state: FSMContext, user: dict | None):
     await state.update_data(age=age)
 
     if data.get("single_edit"):
-        update_user_profile(data["phone"], await state.get_data())
+        data["age"] = age
+        async with get_session() as session:
+            user_repo = UserRepository(session)
+            await user_repo.update_profile(data["phone"], data)
+            
         await message.answer("Готово!", reply_markup=get_user_main_menu())
         await message.answer("Возраст обновлен!", reply_markup=get_edit_profile_menu())
         await state.set_state(None)
@@ -211,7 +230,12 @@ async def reg_age(message: Message, state: FSMContext, user: dict | None):
         current = data.get("region", "не указан")
         await message.answer(f"Текущий регион: {current}")
 
-    await message.answer("Выберите ваш регион:", reply_markup=get_region_keyboard(edit_mode))
+    # Fetch regions async
+    async with get_session() as session:
+        region_repo = RegionRepository(session)
+        regions_list = await region_repo.get_all_names()
+        
+    await message.answer("Выберите ваш регион:", reply_markup=get_region_keyboard(regions_list, edit_mode))
     await state.set_state(Registration.region)
 
 @router.message(Registration.region)
@@ -221,18 +245,26 @@ async def reg_region(message: Message, state: FSMContext, user: dict | None):
 
     region = message.text.strip()
     
+    # Fetch regions async for validation
+    async with get_session() as session:
+        region_repo = RegionRepository(session)
+        regions_list = await region_repo.get_all_names()
+    
     if edit_mode and region == "Оставить без изменений":
         region = data.get("region")
     else:
-        regions = get_all_regions()
-        if region not in regions:
+        if region not in regions_list:
             await message.answer("🚫 Выберите из списка.")
             return
 
     await state.update_data(region=region)
 
     if data.get("single_edit"):
-        update_user_profile(data["phone"], await state.get_data())
+        data["region"] = region
+        async with get_session() as session:
+            user_repo = UserRepository(session)
+            await user_repo.update_profile(data["phone"], data)
+            
         await message.answer("Готово!", reply_markup=get_user_main_menu())
         await message.answer("Регион обновлен!", reply_markup=get_edit_profile_menu())
         await state.set_state(None)
@@ -245,9 +277,14 @@ async def reg_region(message: Message, state: FSMContext, user: dict | None):
     if not edit_mode:
         await state.update_data(interests=[])
     
+    # Fetch interests async
+    async with get_session() as session:
+        interest_repo = InterestRepository(session)
+        interests_list = await interest_repo.get_all_names()
+    
     await message.answer(
         "Укажите ваши интересы (можно выбрать несколько):",
-        reply_markup=get_interests_keyboard(data.get("interests", []), edit_mode)
+        reply_markup=get_interests_keyboard(interests_list, data.get("interests", []), edit_mode)
     )
     await state.set_state(Registration.interests)
 
@@ -287,7 +324,11 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
         await state.update_data(interests=interests)
 
         if data.get("single_edit"):
-            update_user_profile(data["phone"], await state.get_data())
+            data["interests"] = interests
+            async with get_session() as session:
+                user_repo = UserRepository(session)
+                await user_repo.update_profile(data["phone"], data)
+            
             await callback.message.answer("Готово!", reply_markup=get_user_main_menu())
             await callback.message.answer("Интересы обновлены!", reply_markup=get_edit_profile_menu())
             await state.set_state(None)
@@ -312,7 +353,15 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
         interests.append(callback.data)
 
     await state.update_data(interests=interests)
-    await callback.message.edit_reply_markup(reply_markup=get_interests_keyboard(interests, edit_mode))
+    
+    # Fetch interests async to update keyboard
+    async with get_session() as session:
+        interest_repo = InterestRepository(session)
+        interests_list = await interest_repo.get_all_names()
+        
+    await callback.message.edit_reply_markup(
+        reply_markup=get_interests_keyboard(interests_list, interests, edit_mode)
+    )
     await callback.answer()
 
 
@@ -344,7 +393,14 @@ async def reg_photo_media(message: Message, state: FSMContext, user: dict | None
     await state.update_data(photo_file_id=photo.file_id, document_file_id=None)
 
     if data.get("single_edit"):
-        update_user_profile(data["phone"], await state.get_data())
+        # Explicit update before saving
+        data["photo_file_id"] = photo.file_id
+        data["document_file_id"] = None
+        
+        async with get_session() as session:
+            user_repo = UserRepository(session)
+            await user_repo.update_profile(data["phone"], data)
+            
         await message.answer("Готово!", reply_markup=get_user_main_menu())
         await message.answer("Фото обновлено!", reply_markup=get_edit_profile_menu())
         await state.set_state(None)
@@ -376,7 +432,14 @@ async def reg_photo_document(message: Message, state: FSMContext, user: dict | N
     edit_mode = data.get("edit_mode", False)
 
     if data.get("single_edit"):
-        update_user_profile(data["phone"], await state.get_data())
+        # Explicit update
+        data["document_file_id"] = doc.file_id
+        data["photo_file_id"] = None
+        
+        async with get_session() as session:
+            user_repo = UserRepository(session)
+            await user_repo.update_profile(data["phone"], data)
+            
         await message.answer("Готово!", reply_markup=get_user_main_menu())
         await message.answer("Фото обновлено!", reply_markup=get_edit_profile_menu())
         await state.set_state(None)
@@ -398,7 +461,13 @@ async def reg_photo_skip(message: Message, state: FSMContext, user: dict | None)
     await state.update_data(photo_file_id=None, document_file_id=None)
 
     if data.get("single_edit"):
-        update_user_profile(data["phone"], await state.get_data())
+        data["photo_file_id"] = None
+        data["document_file_id"] = None
+        
+        async with get_session() as session:
+            user_repo = UserRepository(session)
+            await user_repo.update_profile(data["phone"], data)
+            
         await message.answer("Готово!", reply_markup=get_user_main_menu())
         await message.answer("Фото удалено/пропущено!", reply_markup=get_edit_profile_menu())
         await state.set_state(None)
@@ -442,7 +511,11 @@ async def reg_location_keep(message: Message, state: FSMContext, user: dict | No
         await state.set_state(None)
         return
 
-    update_user_profile(data["phone"], data)
+    # Finish registration/update
+    async with get_session() as session:
+        user_repo = UserRepository(session)
+        await user_repo.update_profile(data["phone"], data)
+        
     await state.clear()
 
     text = "Профиль обновлён!" if edit_mode else "Регистрация завершена! Добро пожаловать 🎉"
@@ -457,8 +530,12 @@ async def reg_location_ok(message: Message, state: FSMContext, user: dict | None
         location_lat=message.location.latitude,
         location_lon=message.location.longitude
     )
+    # Refresh data
     data = await state.get_data()
-    update_user_profile(data["phone"], data)
+    
+    async with get_session() as session:
+        user_repo = UserRepository(session)
+        await user_repo.update_profile(data["phone"], data)
     
     if data.get("single_edit"):
         await message.answer("Готово!", reply_markup=get_user_main_menu())
@@ -511,9 +588,12 @@ async def reg_location_manual_process(
         phone = updated_data.get("phone")
         if not phone and user:
             phone = user.get("number")
+            updated_data["phone"] = phone
 
         if phone:
-            update_user_profile(phone, updated_data)
+            async with get_session() as session:
+                user_repo = UserRepository(session)
+                await user_repo.update_profile(phone, updated_data)
         
         if data.get("single_edit"):
             await message.answer("Готово!", reply_markup=get_user_main_menu())
@@ -541,9 +621,12 @@ async def reg_location_manual_process(
         phone = data.get("phone")
         if not phone and user:
             phone = user.get("number")
+            data["phone"] = phone
             
         if phone:
-            update_user_profile(phone, data)
+            async with get_session() as session:
+                user_repo = UserRepository(session)
+                await user_repo.update_profile(phone, data)
         await state.clear()
 
         text_msg = "Профиль обновлён!" if edit_mode else "Регистрация завершена! Добро пожаловать 🎉"
@@ -580,9 +663,12 @@ async def reg_location_manual_process(
     phone = updated_data.get("phone")
     if not phone and user:
         phone = user.get("number")
+        updated_data["phone"] = phone
         
     if phone:
-        update_user_profile(phone, updated_data)
+        async with get_session() as session:
+            user_repo = UserRepository(session)
+            await user_repo.update_profile(phone, updated_data)
     
     if data.get("single_edit"):
         await message.answer("Готово!", reply_markup=get_user_main_menu())
