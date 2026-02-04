@@ -50,18 +50,42 @@ async def process_excel(message: Message, state: FSMContext, user: dict | None):
         
         interests = []
         regions = []
-
-        if "Interests" in wb.sheetnames:
-            ws = wb["Interests"]
+        
+        # Support multiple sheet name variants
+        interest_sheet_names = ["Interests", "Интересы", "interests", "интересы"]
+        region_sheet_names = ["Regions", "Регионы", "regions", "регионы"]
+        
+        # Find interests sheet
+        interest_ws = None
+        for name in interest_sheet_names:
+            if name in wb.sheetnames:
+                interest_ws = wb[name]
+                break
+        
+        # If no specific sheet found and there's only one sheet, try to use it for both
+        if interest_ws is None and len(wb.sheetnames) == 1:
+            # Single sheet mode - try first column for interests, second for regions
+            ws = wb.active
             for row in ws.iter_rows(min_row=2, values_only=True):
-                if row[0]:
+                if row and len(row) >= 1 and row[0]:
                     interests.append(str(row[0]).strip())
-
-        if "Regions" in wb.sheetnames:
-            ws = wb["Regions"]
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                if row[0]:
-                    regions.append(str(row[0]).strip())
+                if row and len(row) >= 2 and row[1]:
+                    regions.append(str(row[1]).strip())
+        else:
+            # Multi-sheet mode
+            if interest_ws:
+                for row in interest_ws.iter_rows(min_row=2, values_only=True):
+                    if row[0]:
+                        interests.append(str(row[0]).strip())
+            
+            # Find regions sheet
+            for name in region_sheet_names:
+                if name in wb.sheetnames:
+                    region_ws = wb[name]
+                    for row in region_ws.iter_rows(min_row=2, values_only=True):
+                        if row[0]:
+                            regions.append(str(row[0]).strip())
+                    break
         
         # Update database async
         async with get_session() as session:
@@ -79,6 +103,13 @@ async def process_excel(message: Message, state: FSMContext, user: dict | None):
             f"Регионов: {len(regions)}",
             reply_markup=get_admin_menu_keyboard()
         )
+        
+        # Delete the message with file for confidentiality
+        try:
+            await message.delete()
+        except Exception:
+            pass  # Message might already be deleted or bot has no permission
+        
         await state.clear()
 
     except Exception as e:

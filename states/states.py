@@ -24,6 +24,7 @@ class CreateEvent(StatesGroup):
     description = State()
     photo = State()
     invite_friends = State()
+    select_friends = State()  # New: select specific friends to invite
     confirm = State()
     confirm_address = State()
 

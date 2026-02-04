@@ -117,13 +117,26 @@ class FriendRepository(AsyncRepository[Friend]):
             return "error"
     
     async def get_incoming_requests(self, user_id: int) -> List[dict]:
-        """Get incoming friend requests with user details."""
+        """Get incoming friend requests with user details (excluding existing friends)."""
+        # Get requester IDs
         result = await self.session.execute(
             select(FriendRequest.from_user_id).where(
                 FriendRequest.to_user_id == user_id
             )
         )
         requester_ids = [row[0] for row in result.all()]
+        
+        if not requester_ids:
+            return []
+        
+        # Get current friend IDs to filter them out
+        friend_result = await self.session.execute(
+            select(Friend.friend_id).where(Friend.user_id == user_id)
+        )
+        friend_ids = {row[0] for row in friend_result.all()}
+        
+        # Filter out requesters who are already friends
+        requester_ids = [rid for rid in requester_ids if rid not in friend_ids]
         
         if not requester_ids:
             return []

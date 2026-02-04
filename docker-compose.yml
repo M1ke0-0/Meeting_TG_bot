@@ -1,0 +1,39 @@
+services:
+  bot:
+    build: .
+    container_name: meeting_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/botdb
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - bot_network
+
+  db:
+    image: postgres:16-alpine
+    container_name: meeting_bot_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: botdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d botdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bot_network
+
+networks:
+  bot_network:
+    driver: bridge
+
+volumes:
+  postgres_data:

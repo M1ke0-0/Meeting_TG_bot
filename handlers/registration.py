@@ -348,9 +348,11 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
 
         if data.get("single_edit"):
             data["interests"] = interests
-            async with get_session() as session:
-                user_repo = UserRepository(session)
-                await user_repo.update_profile(data["phone"], data)
+            phone = data.get("phone") or (user.get("number") if user else None)
+            if phone:
+                async with get_session() as session:
+                    user_repo = UserRepository(session)
+                    await user_repo.update_profile(phone, data)
             
             await callback.message.answer("Готово!", reply_markup=get_user_main_menu())
             await callback.message.answer("Интересы обновлены!", reply_markup=get_edit_profile_menu())

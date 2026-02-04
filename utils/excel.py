@@ -40,10 +40,13 @@ async def export_users_report(filepath: str):
 
 async def export_events_report(filepath: str):
     """
-    Generates an Excel report of all events.
+    Generates an Excel report of all events with participant counts.
     """
+    from database.repositories import ParticipantRepository
+    
     async with get_session() as session:
         event_repo = EventRepository(session)
+        part_repo = ParticipantRepository(session)
         events = await event_repo.get_all()
         
         wb = Workbook()
@@ -57,8 +60,10 @@ async def export_events_report(filepath: str):
         ws.append(headers)
 
         for event in events:
-            # We need to fetch participants count separately or use joined load
-            # For simplicity, getting basic info
+            # Get actual participant count
+            participants = await part_repo.get_participants(event.id)
+            participant_count = len(participants) if participants else 0
+            
             row = [
                 event.id,
                 event.name,
@@ -68,7 +73,7 @@ async def export_events_report(filepath: str):
                 event.address,
                 event.description,
                 event.organizer_phone,
-                0 # Placeholder for count, could improve with specific query
+                participant_count
             ]
             ws.append(row)
 

@@ -4,6 +4,7 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 
 from database import get_session
 from database.repositories import (
@@ -107,12 +108,34 @@ async def cancel_delete_friend(callback: types.CallbackQuery):
 async def perform_delete_friend(callback: types.CallbackQuery, user: dict | None):
     friend_id = int(callback.data.split("_")[3])
     
+    # Get friend info before deletion
+    async with get_session() as session:
+        user_repo = UserRepository(session)
+        friend_info = await user_repo.get_by_tg_id(friend_id)
+        friend_name = "Пользователь"
+        if friend_info:
+            friend_name = f"{friend_info.name or ''} {friend_info.surname or ''}".strip() or "Пользователь"
+    
     async with get_session() as session:
         friend_repo = FriendRepository(session)
         await friend_repo.delete_friend(user['tg_id'], friend_id)
         
     await callback.message.delete()
     await callback.answer("Пользователь удален из друзей.")
+    
+    my_name = f"{user.get('name', '')} {user.get('surname', '')}".strip() or "Пользователь"
+    
+    # Notify the user who deleted
+    await callback.message.answer(f"❌ Вы удалили {friend_name} из друзей.")
+    
+    # Notify the deleted friend
+    try:
+        await callback.bot.send_message(
+            friend_id,
+            f"😔 {my_name} удалил(а) вас из друзей."
+        )
+    except:
+        pass  # User may have blocked the bot
 
 
 @router.callback_query(lambda c: c.data.startswith("write_message_"))
@@ -144,23 +167,96 @@ async def send_friend_message(message: Message, state: FSMContext, user: dict | 
     target_id = data.get("target_id")
     
     if not target_id:
-        await message.answer("Ошибка: получаateľ не найден.")
+        await message.answer("Ошибка: получатель не найден.")
         await state.clear()
         return
         
     sender_name = f"{user.get('name', '')} {user.get('surname', '')}".strip()
+    header = f"📩 <b>Сообщение от {sender_name}:</b>"
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↩️ Ответить", callback_data=f"write_message_{user['tg_id']}")]
+    ])
     
     try:
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="↩️ Ответить", callback_data=f"write_message_{user['tg_id']}")]
-        ])
-        
-        await message.bot.send_message(
-            target_id,
-            f"📩 <b>Сообщение от {sender_name}:</b>\n\n{message.text}",
-            reply_markup=markup,
-            parse_mode=ParseMode.HTML
-        )
+        # Handle different content types
+        if message.photo:
+            # Photo
+            caption = f"{header}\n\n{message.caption or ''}"
+            await message.bot.send_photo(
+                target_id,
+                photo=message.photo[-1].file_id,
+                caption=caption,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+        elif message.document:
+            # Document/File
+            caption = f"{header}\n\n{message.caption or ''}"
+            await message.bot.send_document(
+                target_id,
+                document=message.document.file_id,
+                caption=caption,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+        elif message.audio:
+            # Audio
+            caption = f"{header}\n\n{message.caption or ''}"
+            await message.bot.send_audio(
+                target_id,
+                audio=message.audio.file_id,
+                caption=caption,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+        elif message.video:
+            # Video
+            caption = f"{header}\n\n{message.caption or ''}"
+            await message.bot.send_video(
+                target_id,
+                video=message.video.file_id,
+                caption=caption,
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+        elif message.voice:
+            # Voice message
+            await message.bot.send_message(target_id, header, parse_mode=ParseMode.HTML)
+            await message.bot.send_voice(
+                target_id,
+                voice=message.voice.file_id,
+                reply_markup=markup
+            )
+        elif message.video_note:
+            # Video note (round video)
+            await message.bot.send_message(target_id, header, parse_mode=ParseMode.HTML)
+            await message.bot.send_video_note(
+                target_id,
+                video_note=message.video_note.file_id,
+                reply_markup=markup
+            )
+        elif message.sticker:
+            # Sticker
+            await message.bot.send_message(target_id, header, parse_mode=ParseMode.HTML)
+            await message.bot.send_sticker(
+                target_id,
+                sticker=message.sticker.file_id,
+                reply_markup=markup
+            )
+        elif message.text:
+            # Text message
+            await message.bot.send_message(
+                target_id,
+                f"{header}\n\n{message.text}",
+                reply_markup=markup,
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await message.answer("❌ Этот тип сообщения не поддерживается.")
+            await state.clear()
+            return
+            
         await message.answer("Сообщение отправлено! ✅", reply_markup=get_user_main_menu())
     except Exception as e:
         logging.error(f"Failed to send message: {e}")
@@ -296,7 +392,10 @@ async def accept_friend(callback: types.CallbackQuery, user: dict | None):
             except Exception: # Catch specific exceptions if possible, e.g., TelegramAPIError
                 pass
         else: # result is None, meaning the operation failed
-            await callback.answer("Ошибка при добавлении.")
+            try:
+                await callback.answer("Ошибка при добавлении.")
+            except TelegramBadRequest:
+                pass  # Query is too old
 
 
 @router.callback_query(lambda c: c.data.startswith("friend_decline_"))
@@ -308,7 +407,10 @@ async def decline_friend(callback: types.CallbackQuery, user: dict | None):
         await friend_repo.decline_request(user['tg_id'], friend_id)
         
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.answer("Заявка отклонена ❌")
+    try:
+        await callback.answer("Заявка отклонена ❌")
+    except TelegramBadRequest:
+        pass  # Query is too old
 
 
 # --- Search Friends ---
@@ -515,7 +617,22 @@ async def add_friend_request(callback: types.CallbackQuery, user: dict | None):
         
         if result == "ok":
             await callback.answer("Заявка отправлена! 📨", show_alert=True)
-            # Notify target
+            
+            # Get target user info for notification
+            async with get_session() as session2:
+                user_repo = UserRepository(session2)
+                target_user = await user_repo.get_by_tg_id(target_id)
+                target_name = "пользователю"
+                if target_user:
+                    target_name = f"{target_user.name or ''} {target_user.surname or ''}".strip() or "пользователю"
+            
+            # Notify sender about sent request
+            await callback.message.answer(
+                f"📤 Заявка в друзья отправлена {target_name}!\n"
+                f"Ожидайте ответа."
+            )
+            
+            # Notify target about incoming request
             try:
                 my_name = f"{user.get('name','')} {user.get('surname','')}".strip()
                 
@@ -528,8 +645,10 @@ async def add_friend_request(callback: types.CallbackQuery, user: dict | None):
                 
                 await callback.bot.send_message(
                     target_id, 
-                    f"👋 Вам пришла заявка в друзья от {my_name}!",
-                    reply_markup=markup
+                    f"📥 Вам пришла заявка в друзья от <b>{my_name}</b>!\n\n"
+                    f"Вы можете принять или отклонить её.",
+                    reply_markup=markup,
+                    parse_mode=ParseMode.HTML
                 )
             except:
                 pass

@@ -212,3 +212,44 @@ def get_location_keyboard(edit_mode=False):
         resize_keyboard=True,
         one_time_keyboard=True
     )
+
+
+def get_friends_select_keyboard(friends: list, selected: list = []) -> InlineKeyboardMarkup:
+    """Клавиатура для выбора друзей при приглашении на мероприятие."""
+    buttons = []
+    for friend in friends:
+        tg_id = friend.get('tg_id')
+        name = f"{friend.get('name', '')} {friend.get('surname', '')}".strip() or "Пользователь"
+        is_selected = tg_id in selected
+        text = f"✅ {name}" if is_selected else name
+        buttons.append([InlineKeyboardButton(text=text, callback_data=f"sel_friend_{tg_id}")])
+    
+    control_buttons = []
+    if friends:
+        control_buttons.append(InlineKeyboardButton(text="✅ Выбрать всех", callback_data="sel_all_friends"))
+    control_buttons.append(InlineKeyboardButton(text="📨 Отправить", callback_data="send_invites"))
+    buttons.append(control_buttons)
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_invites")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_participants_manage_keyboard(event_id: int, participants: list) -> InlineKeyboardMarkup:
+    """Клавиатура для управления участниками мероприятия (организатором)."""
+    buttons = []
+    for p in participants:
+        phone, name, surname, tg_id = p
+        display_name = f"{name or ''} {surname or ''}".strip() or "Пользователь"
+        # Use phone hash for callback to avoid issues with long phones
+        phone_short = phone[-4:] if phone else "0000"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"❌ {display_name}", 
+                callback_data=f"rm_part_{event_id}_{phone_short}"
+            )
+        ])
+    
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data=f"back_participants_{event_id}")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+

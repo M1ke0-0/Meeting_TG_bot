@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Optional, List
 
 from sqlalchemy import (
-    String, Integer, Float, Text, DateTime, ForeignKey, 
+    String, Integer, BigInteger, Float, Text, DateTime, ForeignKey, 
     CheckConstraint, UniqueConstraint
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -26,7 +26,7 @@ class User(Base):
         default="user"
     )
     registered: Mapped[int] = mapped_column(Integer, default=0)
-    tg_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, nullable=True)
+    tg_id: Mapped[Optional[int]] = mapped_column(BigInteger, unique=True, nullable=True)
     name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     surname: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     gender: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
@@ -190,8 +190,8 @@ class Friend(Base):
     """Friend relationships between users."""
     __tablename__ = "friends"
     
-    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    friend_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    friend_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
@@ -203,8 +203,8 @@ class FriendRequest(Base):
     """Pending friend requests."""
     __tablename__ = "friend_requests"
     
-    from_user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    to_user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    from_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    to_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,

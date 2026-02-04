@@ -125,3 +125,47 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
             .where(EventParticipant.event_id == event_id)
         )
         return [row[0] for row in result.all() if row[0] is not None]
+    
+    async def remove_participant(
+        self, event_id: int, participant_phone: str
+    ) -> Tuple[bool, Optional[int]]:
+        """
+        Remove a participant from event (by organizer).
+        Returns (success, participant_tg_id).
+        """
+        # Get participant's tg_id for notification
+        result = await self.session.execute(
+            select(User.tg_id).where(User.number == participant_phone)
+        )
+        row = result.one_or_none()
+        tg_id = row[0] if row else None
+        
+        # Delete participation
+        delete_result = await self.session.execute(
+            delete(EventParticipant).where(
+                and_(
+                    EventParticipant.event_id == event_id,
+                    EventParticipant.participant_phone == participant_phone
+                )
+            )
+        )
+        
+        if delete_result.rowcount == 0:
+            return False, None
+        
+        return True, tg_id
+    
+    async def get_participants_with_details(
+        self, event_id: int
+    ) -> List[Tuple[str, str, str, int]]:
+        """Get participants with details: (phone, name, surname, tg_id)."""
+        result = await self.session.execute(
+            select(User.number, User.name, User.surname, User.tg_id)
+            .join(
+                EventParticipant,
+                EventParticipant.participant_phone == User.number
+            )
+            .where(EventParticipant.event_id == event_id)
+            .order_by(User.name, User.surname)
+        )
+        return list(result.all())

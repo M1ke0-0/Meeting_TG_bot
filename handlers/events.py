@@ -13,7 +13,8 @@ from states.states import CreateEvent
 from keyboards.builders import (
     get_interests_keyboard, get_description_keyboard, get_photo_keyboard,
     get_user_main_menu, get_events_menu_keyboard, get_event_card_keyboard_optimized,
-    get_my_event_card_keyboard, get_event_creation_keyboard
+    get_my_event_card_keyboard, get_event_creation_keyboard, get_friends_select_keyboard,
+    get_participants_manage_keyboard
 )
 from utils.validation import escape_html, is_valid_date, is_valid_time
 
@@ -307,11 +308,33 @@ async def event_photo(message: Message, state: FSMContext):
 @router.message(CreateEvent.invite_friends)
 async def event_invite_friends(message: Message, state: FSMContext, user: dict | None):
     data = await state.get_data()
-    invite = (message.text == "Да, пригласить")
     
-    notifications_to_send = []
-    invited_count = 0
-    
+    if message.text == "Да, пригласить":
+        # Get user's friends (not potential friends by interests)
+        async with get_session() as session:
+            friend_repo = FriendRepository(session)
+            friends = await friend_repo.get_friends(user['tg_id'])
+        
+        if not friends:
+            # No friends, create event without invites
+            await _create_event_without_invites(message, state, user, data)
+            return
+        
+        # Show friend selection keyboard
+        await state.update_data(selected_friends=[])
+        await state.set_state(CreateEvent.select_friends)
+        
+        await message.answer(
+            "Выберите друзей для приглашения:\n(нажмите на друга чтобы выбрать/отменить)",
+            reply_markup=get_friends_select_keyboard(friends, [])
+        )
+    else:
+        # Create event without invites
+        await _create_event_without_invites(message, state, user, data)
+
+
+async def _create_event_without_invites(message: Message, state: FSMContext, user: dict, data: dict):
+    """Helper to create event without inviting anyone."""
     async with get_session() as session:
         event_repo = EventRepository(session)
         event_id = await event_repo.create(user["number"], data)
@@ -320,27 +343,100 @@ async def event_invite_friends(message: Message, state: FSMContext, user: dict |
             await message.answer("Ошибка при создании мероприятия.", reply_markup=get_events_menu_keyboard())
             await state.clear()
             return
-            
-        if invite:
-            user_repo = UserRepository(session)
-            invite_repo = InviteRepository(session)
-            
-            # Find friends with matching interests
-            potential_friends = await user_repo.find_potential_friends(
-                user["number"], 
-                data.get("interests", [])
-            )
-            
-            for friend in potential_friends:
-                # Add invite
-                if await invite_repo.create_invite(event_id, friend["phone"]):
-                    invited_count += 1
-                    # Collect data for notification
-                    if friend.get("tg_id"):
-                        notifications_to_send.append(friend["tg_id"])
     
-    # Send notifications after DB transaction is committed
+    await message.answer(
+        f"Мероприятие «{data['name']}» создано! 🎉",
+        reply_markup=get_events_menu_keyboard()
+    )
+    await state.clear()
+
+
+@router.callback_query(CreateEvent.select_friends)
+async def select_friends_callback(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
+    data = await state.get_data()
+    selected = data.get('selected_friends', [])
+    
+    if callback.data == "cancel_invites":
+        # Create without invites
+        await _create_event_without_invites(callback.message, state, user, data)
+        await callback.answer()
+        return
+    
+    if callback.data == "sel_all_friends":
+        # Select all friends
+        async with get_session() as session:
+            friend_repo = FriendRepository(session)
+            friends = await friend_repo.get_friends(user['tg_id'])
+        selected = [f['tg_id'] for f in friends if f.get('tg_id')]
+        await state.update_data(selected_friends=selected)
+        await callback.message.edit_reply_markup(
+            reply_markup=get_friends_select_keyboard(friends, selected)
+        )
+        await callback.answer("Все друзья выбраны")
+        return
+    
+    if callback.data == "send_invites":
+        if not selected:
+            await callback.answer("Выберите хотя бы одного друга!", show_alert=True)
+            return
+        
+        # Create event and send invites
+        await _create_event_with_invites(callback, state, user, data, selected)
+        return
+    
+    if callback.data.startswith("sel_friend_"):
+        friend_tg_id = int(callback.data.split("_")[2])
+        
+        if friend_tg_id in selected:
+            selected.remove(friend_tg_id)
+        else:
+            selected.append(friend_tg_id)
+        
+        await state.update_data(selected_friends=selected)
+        
+        # Update keyboard
+        async with get_session() as session:
+            friend_repo = FriendRepository(session)
+            friends = await friend_repo.get_friends(user['tg_id'])
+        
+        await callback.message.edit_reply_markup(
+            reply_markup=get_friends_select_keyboard(friends, selected)
+        )
+        await callback.answer()
+
+
+async def _create_event_with_invites(
+    callback: types.CallbackQuery, state: FSMContext, 
+    user: dict, data: dict, selected_tg_ids: list
+):
+    """Create event and send invites to selected friends."""
+    notifications_to_send = []
+    invited_count = 0
+    
+    async with get_session() as session:
+        event_repo = EventRepository(session)
+        event_id = await event_repo.create(user["number"], data)
+        
+        if not event_id:
+            await callback.message.answer("Ошибка при создании мероприятия.", reply_markup=get_events_menu_keyboard())
+            await state.clear()
+            await callback.answer()
+            return
+        
+        user_repo = UserRepository(session)
+        invite_repo = InviteRepository(session)
+        
+        for tg_id in selected_tg_ids:
+            # Get user by tg_id
+            friend_user = await user_repo.get_by_tg_id(tg_id)
+            if friend_user and friend_user.number:
+                if await invite_repo.create_invite(event_id, friend_user.number):
+                    invited_count += 1
+                    notifications_to_send.append(tg_id)
+    
+    # Send notifications
     if notifications_to_send:
+        my_name = f"{user.get('name', '')} {user.get('surname', '')}".strip()
         markup = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="✅ Принять", callback_data=f"invite_accept_{event_id}")],
             [types.InlineKeyboardButton(text="❌ Отклонить", callback_data=f"invite_decline_{event_id}")]
@@ -348,20 +444,22 @@ async def event_invite_friends(message: Message, state: FSMContext, user: dict |
         
         for tg_id in notifications_to_send:
             try:
-                await message.bot.send_message(
+                await callback.bot.send_message(
                     tg_id,
-                    f"Вас приглашают на мероприятие «{data['name']}»!",
-                    reply_markup=markup
+                    f"📩 <b>{my_name}</b> приглашает вас на мероприятие «{data['name']}»!",
+                    reply_markup=markup,
+                    parse_mode=ParseMode.HTML
                 )
             except Exception as e:
                 logging.error(f"Failed to send invite to tg_id {tg_id}: {e}")
-
-    await message.answer(
-        f"Мероприятие «{data['name']}» создано! 🎉\n" +
-        (f"Приглашено друзей: {invited_count}" if invite else ""),
-        reply_markup=get_events_menu_keyboard()
+    
+    await callback.message.edit_text(
+        f"Мероприятие «{data['name']}» создано! 🎉\n"
+        f"Приглашено друзей: {invited_count}"
     )
+    await callback.message.answer("Выберите действие:", reply_markup=get_events_menu_keyboard())
     await state.clear()
+    await callback.answer()
 
 
 # --- Viewing Events ---
@@ -538,12 +636,17 @@ async def view_map(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("view_participants_"))
-async def view_participants(callback: types.CallbackQuery):
+async def view_participants(callback: types.CallbackQuery, user: dict | None):
     event_id = int(callback.data.split("_")[2])
     
     async with get_session() as session:
         part_repo = ParticipantRepository(session)
         participants = await part_repo.get_participants(event_id)
+        
+        # Check if user is organizer
+        event_repo = EventRepository(session)
+        event = await event_repo.get_by_id(event_id)
+        is_organizer = event and event.get('organizer_phone') == user.get('number')
         
     if not participants:
         await callback.answer("Участников пока нет.", show_alert=True)
@@ -556,14 +659,120 @@ async def view_participants(callback: types.CallbackQuery):
         if age:
             text += f" ({age} лет)"
         text += "\n"
+    
+    if is_organizer:
+        text += "\n<i>Нажмите «Управление», чтобы удалить участника</i>"
+        kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="⚙️ Управление участниками", callback_data=f"manage_participants_{event_id}")]
+        ])
+        await callback.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    else:
+        await callback.message.answer(text, parse_mode=ParseMode.HTML)
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("manage_participants_"))
+async def manage_participants(callback: types.CallbackQuery, user: dict | None):
+    """Show participants with remove buttons for organizer."""
+    event_id = int(callback.data.split("_")[2])
+    
+    async with get_session() as session:
+        # Verify organizer
+        event_repo = EventRepository(session)
+        event = await event_repo.get_by_id(event_id)
         
-    await callback.message.answer(text, parse_mode=ParseMode.HTML)
+        if not event or event.get('organizer_phone') != user.get('number'):
+            await callback.answer("Только организатор может управлять участниками.", show_alert=True)
+            return
+        
+        part_repo = ParticipantRepository(session)
+        participants = await part_repo.get_participants_with_details(event_id)
+    
+    if not participants:
+        await callback.answer("Участников нет.", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        "👥 <b>Управление участниками</b>\n\nНажмите, чтобы удалить участника:",
+        reply_markup=get_participants_manage_keyboard(event_id, participants),
+        parse_mode=ParseMode.HTML
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("rm_part_"))
+async def remove_participant_handler(callback: types.CallbackQuery, user: dict | None):
+    """Remove a participant from event (organizer only)."""
+    parts = callback.data.split("_")
+    event_id = int(parts[2])
+    phone_suffix = parts[3]  # last 4 digits
+    
+    async with get_session() as session:
+        # Verify organizer
+        event_repo = EventRepository(session)
+        event = await event_repo.get_by_id(event_id)
+        
+        if not event or event.get('organizer_phone') != user.get('number'):
+            await callback.answer("Только организатор может удалять участников.", show_alert=True)
+            return
+        
+        # Find participant by phone suffix
+        part_repo = ParticipantRepository(session)
+        participants = await part_repo.get_participants_with_details(event_id)
+        
+        target_participant = None
+        for p in participants:
+            phone, name, surname, tg_id = p
+            if phone and phone.endswith(phone_suffix):
+                target_participant = p
+                break
+        
+        if not target_participant:
+            await callback.answer("Участник не найден.", show_alert=True)
+            return
+        
+        phone, name, surname, tg_id = target_participant
+        success, removed_tg_id = await part_repo.remove_participant(event_id, phone)
+        
+        if success:
+            display_name = f"{name or ''} {surname or ''}".strip() or "Пользователь"
+            
+            # Notify removed participant
+            if removed_tg_id:
+                organizer_name = f"{user.get('name', '')} {user.get('surname', '')}".strip()
+                try:
+                    await callback.bot.send_message(
+                        removed_tg_id,
+                        f"😔 Организатор ({organizer_name}) удалил вас из мероприятия «{event['name']}»."
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to notify removed participant: {e}")
+            
+            await callback.answer(f"Участник {display_name} удалён.", show_alert=True)
+            
+            # Refresh list
+            updated_participants = await part_repo.get_participants_with_details(event_id)
+            if updated_participants:
+                await callback.message.edit_reply_markup(
+                    reply_markup=get_participants_manage_keyboard(event_id, updated_participants)
+                )
+            else:
+                await callback.message.edit_text("👥 Все участники удалены.")
+        else:
+            await callback.answer("Ошибка при удалении.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("back_participants_"))
+async def back_from_manage(callback: types.CallbackQuery):
+    """Back to event menu from participant management."""
+    await callback.message.delete()
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("invite_to_event_"))
-async def invite_users_to_event(callback: types.CallbackQuery, user: dict | None):
-    # Retrieve event to get interests etc
+async def invite_users_to_event(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
+    """Invite friends to an existing event (from My Events)."""
     event_id = int(callback.data.split("_")[3])
     
     async with get_session() as session:
@@ -573,39 +782,116 @@ async def invite_users_to_event(callback: types.CallbackQuery, user: dict | None
         if not event:
             await callback.answer("Мероприятие не найдено")
             return
-            
-        # Find potential friends
-        interests = event.get('interests', '').split(",") if event.get('interests') else []
-        user_repo = UserRepository(session)
-        potential = await user_repo.find_potential_friends(user['number'], interests)
+        
+        # Get user's friends
+        friend_repo = FriendRepository(session)
+        friends = await friend_repo.get_friends(user['tg_id'])
     
-    if not potential:
-        await callback.answer("Подходящих пользователей не найдено.", show_alert=True)
+    if not friends:
+        await callback.answer("У вас пока нет друзей для приглашения.", show_alert=True)
         return
-        
-    # Send invites
-    invited_count = 0
-    async with get_session() as session:
-        invite_repo = InviteRepository(session)
-        
-        for friend in potential:
-            if await invite_repo.create_invite(event_id, friend["phone"]):
-                invited_count += 1
-                try:
-                    markup = types.InlineKeyboardMarkup(inline_keyboard=[
-                        [types.InlineKeyboardButton(text="✅ Принять", callback_data=f"invite_accept_{event_id}")],
-                        [types.InlineKeyboardButton(text="❌ Отклонить", callback_data=f"invite_decline_{event_id}")]
-                    ])
-                    if friend.get("tg_id"):
-                        await callback.bot.send_message(
-                            friend["tg_id"],
-                            f"Вас приглашают на мероприятие «{event['name']}»!",
-                            reply_markup=markup
-                        )
-                except Exception as e:
-                    pass
+    
+    # Store event_id in state for later use
+    await state.update_data(
+        invite_event_id=event_id,
+        invite_event_name=event['name'],
+        selected_invite_friends=[]
+    )
+    
+    await callback.message.answer(
+        f"Выберите друзей для приглашения на «{event['name']}»:",
+        reply_markup=get_friends_select_keyboard(friends, [])
+    )
+    await callback.answer()
 
-    await callback.answer(f"Приглашения отправлены: {invited_count}", show_alert=True)
+
+@router.callback_query(lambda c: c.data in ["sel_all_friends", "send_invites", "cancel_invites"] or c.data.startswith("sel_friend_"))
+async def handle_invite_selection(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
+    """Handle friend selection for existing event invites."""
+    data = await state.get_data()
+    
+    # Check if this is for existing event invite (not during creation)
+    if 'invite_event_id' not in data:
+        return  # This is handled by CreateEvent.select_friends state instead
+    
+    event_id = data['invite_event_id']
+    event_name = data['invite_event_name']
+    selected = data.get('selected_invite_friends', [])
+    
+    if callback.data == "cancel_invites":
+        await state.clear()
+        await callback.message.delete()
+        await callback.answer("Приглашение отменено")
+        return
+    
+    if callback.data == "sel_all_friends":
+        async with get_session() as session:
+            friend_repo = FriendRepository(session)
+            friends = await friend_repo.get_friends(user['tg_id'])
+        selected = [f['tg_id'] for f in friends if f.get('tg_id')]
+        await state.update_data(selected_invite_friends=selected)
+        await callback.message.edit_reply_markup(
+            reply_markup=get_friends_select_keyboard(friends, selected)
+        )
+        await callback.answer("Все друзья выбраны")
+        return
+    
+    if callback.data == "send_invites":
+        if not selected:
+            await callback.answer("Выберите хотя бы одного друга!", show_alert=True)
+            return
+        
+        # Send invites
+        invited_count = 0
+        my_name = f"{user.get('name', '')} {user.get('surname', '')}".strip()
+        
+        async with get_session() as session:
+            user_repo = UserRepository(session)
+            invite_repo = InviteRepository(session)
+            
+            markup = types.InlineKeyboardMarkup(inline_keyboard=[
+                [types.InlineKeyboardButton(text="✅ Принять", callback_data=f"invite_accept_{event_id}")],
+                [types.InlineKeyboardButton(text="❌ Отклонить", callback_data=f"invite_decline_{event_id}")]
+            ])
+            
+            for tg_id in selected:
+                friend_user = await user_repo.get_by_tg_id(tg_id)
+                if friend_user and friend_user.number:
+                    if await invite_repo.create_invite(event_id, friend_user.number):
+                        invited_count += 1
+                        try:
+                            await callback.bot.send_message(
+                                tg_id,
+                                f"📩 <b>{my_name}</b> приглашает вас на мероприятие «{event_name}»!",
+                                reply_markup=markup,
+                                parse_mode=ParseMode.HTML
+                            )
+                        except:
+                            pass
+        
+        await state.clear()
+        await callback.message.edit_text(f"✅ Приглашения отправлены: {invited_count}")
+        await callback.answer()
+        return
+    
+    if callback.data.startswith("sel_friend_"):
+        friend_tg_id = int(callback.data.split("_")[2])
+        
+        if friend_tg_id in selected:
+            selected.remove(friend_tg_id)
+        else:
+            selected.append(friend_tg_id)
+        
+        await state.update_data(selected_invite_friends=selected)
+        
+        async with get_session() as session:
+            friend_repo = FriendRepository(session)
+            friends = await friend_repo.get_friends(user['tg_id'])
+        
+        await callback.message.edit_reply_markup(
+            reply_markup=get_friends_select_keyboard(friends, selected)
+        )
+        await callback.answer()
 
 
 @router.callback_query(lambda c: c.data.startswith("invite_accept_"))
