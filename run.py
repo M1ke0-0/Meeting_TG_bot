@@ -38,9 +38,9 @@ async def check_reference_data():
         regions = await region_repo.get_all_names()
         interests = await interest_repo.get_all_names()
         
-        if regions == ["Регионы пока не добавлены"]:
+        if not regions:
             print("ВНИМАНИЕ: таблица regions пуста! Загрузите Excel-файл через админ-панель.")
-        if interests == ["Интересы пока не добавлены"]:
+        if not interests:
             print("ВНИМАНИЕ: таблица interests пуста! Загрузите Excel-файл через админ-панель.")
 
 
@@ -83,7 +83,7 @@ async def main():
     print("Бот запускается...")
     
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), skip_updates=True)
     finally:
         await close_database()
 

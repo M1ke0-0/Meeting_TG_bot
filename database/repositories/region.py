@@ -22,17 +22,16 @@ class RegionRepository(AsyncRepository[Region]):
             select(Region.name).order_by(Region.name)
         )
         regions = [row[0] for row in result.all()]
-        return regions if regions else ["Регионы пока не добавлены"]
+        return regions
     
     async def replace_all(self, regions: List[str]) -> None:
         """
         Replace all regions with new list.
         Deletes existing and inserts new ones.
         """
-        # Delete all existing
         await self.session.execute(delete(Region))
         
-        # Insert new ones
+        
         for name in regions:
             name = name.strip()
             if name:

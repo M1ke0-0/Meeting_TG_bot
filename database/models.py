@@ -32,7 +32,7 @@ class User(Base):
     gender: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     region: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    interests: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # comma-separated
+    interests: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  
     photo_file_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     document_file_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     location_lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -43,7 +43,6 @@ class User(Base):
         nullable=False
     )
     
-    # Relationships
     organized_events: Mapped[List["Event"]] = relationship(
         back_populates="organizer",
         foreign_keys="Event.organizer_phone"
@@ -84,9 +83,9 @@ class Event(Base):
         nullable=False
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    date: Mapped[str] = mapped_column(String(10), nullable=False)  # DD.MM.YYYY
-    time: Mapped[str] = mapped_column(String(5), nullable=False)   # HH:MM
-    interests: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # comma-separated
+    date: Mapped[str] = mapped_column(String(10), nullable=False)  
+    time: Mapped[str] = mapped_column(String(5), nullable=False)   
+    interests: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  
     address: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -99,7 +98,6 @@ class Event(Base):
         nullable=False
     )
     
-    # Relationships
     organizer: Mapped["User"] = relationship(
         back_populates="organized_events",
         foreign_keys=[organizer_phone]
@@ -151,7 +149,6 @@ class EventParticipant(Base):
         nullable=False
     )
     
-    # Relationships
     event: Mapped["Event"] = relationship(back_populates="participants")
     participant: Mapped["User"] = relationship(foreign_keys=[participant_phone])
 
@@ -174,14 +171,13 @@ class EventInvite(Base):
         String(20),
         default="pending",
         nullable=False
-    )  # pending, accepted, declined
+    )  
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
         nullable=False
     )
     
-    # Relationships
     event: Mapped["Event"] = relationship(back_populates="invites")
     invited_user: Mapped["User"] = relationship(foreign_keys=[invited_phone])
 

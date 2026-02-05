@@ -44,7 +44,6 @@ async def get_event_card_text(event: dict, session=None):
     organizer_phone = event.get('organizer_phone')
     masked_organizer = mask_phone(organizer_phone)
     
-    # Try to get organizer name
     organizer_name = masked_organizer
     if session:
         user_repo = UserRepository(session)
@@ -68,7 +67,6 @@ async def get_event_card_text(event: dict, session=None):
 async def events_menu(message: Message):
     await message.answer("Выберите действие:", reply_markup=get_events_menu_keyboard())
 
-# --- Creating Events ---
 
 @router.message(F.text == "Создать мероприятие")
 async def create_event_start(message: Message, state: FSMContext, user: dict | None):
@@ -116,7 +114,6 @@ async def event_time(message: Message, state: FSMContext):
         return
     await state.update_data(time=message.text)
     
-    # Fetch interests async
     async with get_session() as session:
         interest_repo = InterestRepository(session)
         interests_list = await interest_repo.get_all_names()
@@ -146,7 +143,6 @@ async def event_interests_callback(callback: types.CallbackQuery, state: FSMCont
         await callback.answer()
         return
 
-    # Check for ignore edit profile callback
     if callback.data == "keep_current": 
         await callback.answer()
         return
@@ -158,7 +154,6 @@ async def event_interests_callback(callback: types.CallbackQuery, state: FSMCont
 
     await state.update_data(interests=interests)
     
-    # Fetch interests async
     async with get_session() as session:
         interest_repo = InterestRepository(session)
         interests_list = await interest_repo.get_all_names()
@@ -177,7 +172,6 @@ async def event_address(message: Message, state: FSMContext):
         lat, lon = message.location.latitude, message.location.longitude
         addr_str = f"Геолокация: {lat}, {lon}"
         
-        # Try to reverse geocode if possible (optional, maybe later)
         await state.update_data(address=addr_str, latitude=lat, longitude=lon)
         
         await message.answer(
@@ -187,7 +181,6 @@ async def event_address(message: Message, state: FSMContext):
         await state.set_state(CreateEvent.description)
         
     elif message.text:
-        # Try to geocode
         await message.answer("🔍 Ищем адрес...")
         
         coordinates = await asyncio.to_thread(get_coordinates, message.text)
@@ -200,7 +193,6 @@ async def event_address(message: Message, state: FSMContext):
                  temp_lon=lon
             )
             
-            # Send location validation
             kb = types.ReplyKeyboardMarkup(
                 keyboard=[
                     [types.KeyboardButton(text="Да, верно")],
@@ -293,7 +285,6 @@ async def event_photo(message: Message, state: FSMContext):
     
     await state.set_state(CreateEvent.invite_friends)
     
-    # Ask about inviting friends
     kb = types.ReplyKeyboardMarkup(
         keyboard=[
             [types.KeyboardButton(text="Да, пригласить")],
@@ -310,17 +301,14 @@ async def event_invite_friends(message: Message, state: FSMContext, user: dict |
     data = await state.get_data()
     
     if message.text == "Да, пригласить":
-        # Get user's friends (not potential friends by interests)
         async with get_session() as session:
             friend_repo = FriendRepository(session)
             friends = await friend_repo.get_friends(user['tg_id'])
         
         if not friends:
-            # No friends, create event without invites
             await _create_event_without_invites(message, state, user, data)
             return
         
-        # Show friend selection keyboard
         await state.update_data(selected_friends=[])
         await state.set_state(CreateEvent.select_friends)
         
@@ -329,7 +317,6 @@ async def event_invite_friends(message: Message, state: FSMContext, user: dict |
             reply_markup=get_friends_select_keyboard(friends, [])
         )
     else:
-        # Create event without invites
         await _create_event_without_invites(message, state, user, data)
 
 
@@ -357,13 +344,11 @@ async def select_friends_callback(callback: types.CallbackQuery, state: FSMConte
     selected = data.get('selected_friends', [])
     
     if callback.data == "cancel_invites":
-        # Create without invites
         await _create_event_without_invites(callback.message, state, user, data)
         await callback.answer()
         return
     
     if callback.data == "sel_all_friends":
-        # Select all friends
         async with get_session() as session:
             friend_repo = FriendRepository(session)
             friends = await friend_repo.get_friends(user['tg_id'])
@@ -380,7 +365,6 @@ async def select_friends_callback(callback: types.CallbackQuery, state: FSMConte
             await callback.answer("Выберите хотя бы одного друга!", show_alert=True)
             return
         
-        # Create event and send invites
         await _create_event_with_invites(callback, state, user, data, selected)
         return
     
@@ -394,7 +378,6 @@ async def select_friends_callback(callback: types.CallbackQuery, state: FSMConte
         
         await state.update_data(selected_friends=selected)
         
-        # Update keyboard
         async with get_session() as session:
             friend_repo = FriendRepository(session)
             friends = await friend_repo.get_friends(user['tg_id'])
@@ -427,14 +410,12 @@ async def _create_event_with_invites(
         invite_repo = InviteRepository(session)
         
         for tg_id in selected_tg_ids:
-            # Get user by tg_id
             friend_user = await user_repo.get_by_tg_id(tg_id)
             if friend_user and friend_user.number:
                 if await invite_repo.create_invite(event_id, friend_user.number):
                     invited_count += 1
                     notifications_to_send.append(tg_id)
     
-    # Send notifications
     if notifications_to_send:
         my_name = f"{user.get('name', '')} {user.get('surname', '')}".strip()
         markup = types.InlineKeyboardMarkup(inline_keyboard=[
@@ -462,7 +443,6 @@ async def _create_event_with_invites(
     await callback.answer()
 
 
-# --- Viewing Events ---
 
 @router.message(F.text == "Мероприятия друзей")
 async def view_friends_events(message: Message, user: dict | None):
@@ -478,8 +458,6 @@ async def view_friends_events(message: Message, user: dict | None):
         return
 
     for event_row in events:
-        # Tuple format from repo:
-        # id, name, date, time, address, interests, description, organizer_phone, is_participant
         try:
             (eid, name, date, time, addr, interests, desc, org_phone, lat, lon, is_part) = event_row
             
@@ -525,7 +503,6 @@ async def view_my_events(message: Message, user: dict | None):
         if organized:
             await message.answer("<b>Вы организатор:</b>", parse_mode=ParseMode.HTML)
             for e_row in organized:
-                # id, name, date, time, address, interests, desc, org_phone, is_org, is_part
                 eid = e_row[0]
                 event_dict = {
                     "name": e_row[1], "date": e_row[2], "time": e_row[3],
@@ -550,7 +527,6 @@ async def view_my_events(message: Message, user: dict | None):
                 await message.answer(caption, reply_markup=kb, parse_mode=ParseMode.HTML)
 
 
-# --- Event Actions ---
 
 @router.callback_query(F.data.startswith("join_event_"))
 async def join_event_handler(callback: types.CallbackQuery, user: dict | None):
@@ -562,7 +538,6 @@ async def join_event_handler(callback: types.CallbackQuery, user: dict | None):
         
         if success:
             await callback.answer("Вы успешно записались!", show_alert=True)
-            # Update message to show "Leave" button
             event_repo = EventRepository(session)
             event = await event_repo.get_by_id(event_id)
             if event:
@@ -588,7 +563,6 @@ async def leave_event_handler(callback: types.CallbackQuery, user: dict | None):
         if success:
             await callback.answer("Вы отказались от участия.", show_alert=True)
             
-            # Notify organizer if possible
             if organizer_phone:
                 user_repo = UserRepository(session)
                 organizer = await user_repo.get_by_phone(organizer_phone)
@@ -603,7 +577,6 @@ async def leave_event_handler(callback: types.CallbackQuery, user: dict | None):
                     except Exception as e:
                         logging.error(f"Failed to notify organizer: {e}")
             
-            # Update card
             event_repo = EventRepository(session)
             event = await event_repo.get_by_id(event_id)
             if event:
@@ -643,7 +616,6 @@ async def view_participants(callback: types.CallbackQuery, user: dict | None):
         part_repo = ParticipantRepository(session)
         participants = await part_repo.get_participants(event_id)
         
-        # Check if user is organizer
         event_repo = EventRepository(session)
         event = await event_repo.get_by_id(event_id)
         is_organizer = event and event.get('organizer_phone') == user.get('number')
@@ -678,7 +650,6 @@ async def manage_participants(callback: types.CallbackQuery, user: dict | None):
     event_id = int(callback.data.split("_")[2])
     
     async with get_session() as session:
-        # Verify organizer
         event_repo = EventRepository(session)
         event = await event_repo.get_by_id(event_id)
         
@@ -706,10 +677,9 @@ async def remove_participant_handler(callback: types.CallbackQuery, user: dict |
     """Remove a participant from event (organizer only)."""
     parts = callback.data.split("_")
     event_id = int(parts[2])
-    phone_suffix = parts[3]  # last 4 digits
-    
+    phone_suffix = parts[3]  
+
     async with get_session() as session:
-        # Verify organizer
         event_repo = EventRepository(session)
         event = await event_repo.get_by_id(event_id)
         
@@ -717,7 +687,6 @@ async def remove_participant_handler(callback: types.CallbackQuery, user: dict |
             await callback.answer("Только организатор может удалять участников.", show_alert=True)
             return
         
-        # Find participant by phone suffix
         part_repo = ParticipantRepository(session)
         participants = await part_repo.get_participants_with_details(event_id)
         
@@ -738,7 +707,6 @@ async def remove_participant_handler(callback: types.CallbackQuery, user: dict |
         if success:
             display_name = f"{name or ''} {surname or ''}".strip() or "Пользователь"
             
-            # Notify removed participant
             if removed_tg_id:
                 organizer_name = f"{user.get('name', '')} {user.get('surname', '')}".strip()
                 try:
@@ -751,7 +719,6 @@ async def remove_participant_handler(callback: types.CallbackQuery, user: dict |
             
             await callback.answer(f"Участник {display_name} удалён.", show_alert=True)
             
-            # Refresh list
             updated_participants = await part_repo.get_participants_with_details(event_id)
             if updated_participants:
                 await callback.message.edit_reply_markup(
@@ -783,7 +750,6 @@ async def invite_users_to_event(callback: types.CallbackQuery, state: FSMContext
             await callback.answer("Мероприятие не найдено")
             return
         
-        # Get user's friends
         friend_repo = FriendRepository(session)
         friends = await friend_repo.get_friends(user['tg_id'])
     
@@ -791,7 +757,6 @@ async def invite_users_to_event(callback: types.CallbackQuery, state: FSMContext
         await callback.answer("У вас пока нет друзей для приглашения.", show_alert=True)
         return
     
-    # Store event_id in state for later use
     await state.update_data(
         invite_event_id=event_id,
         invite_event_name=event['name'],
@@ -810,9 +775,8 @@ async def handle_invite_selection(callback: types.CallbackQuery, state: FSMConte
     """Handle friend selection for existing event invites."""
     data = await state.get_data()
     
-    # Check if this is for existing event invite (not during creation)
     if 'invite_event_id' not in data:
-        return  # This is handled by CreateEvent.select_friends state instead
+        return  
     
     event_id = data['invite_event_id']
     event_name = data['invite_event_name']
@@ -841,7 +805,6 @@ async def handle_invite_selection(callback: types.CallbackQuery, state: FSMConte
             await callback.answer("Выберите хотя бы одного друга!", show_alert=True)
             return
         
-        # Send invites
         invited_count = 0
         my_name = f"{user.get('name', '')} {user.get('surname', '')}".strip()
         
@@ -916,7 +879,6 @@ async def process_invite_accept(callback: types.CallbackQuery, user: dict | None
             parse_mode=ParseMode.HTML
         )
         
-        # Notify organizer
         async with get_session() as session:
             event_repo = EventRepository(session)
             event = await event_repo.get_by_id(event_id)

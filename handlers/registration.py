@@ -3,18 +3,40 @@ import re
 from aiogram import Router, F, types
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
+from aiogram.exceptions import TelegramBadRequest
 
 from states.states import Registration
 from keyboards.builders import (
     get_skip_edit_keyboard, get_gender_keyboard, get_region_keyboard,
     get_interests_keyboard, get_photo_keyboard, get_location_keyboard,
-    get_user_main_menu, get_contact_keyboard, get_edit_profile_menu
+    get_user_main_menu, get_contact_keyboard, get_edit_profile_menu,
+    get_admin_menu_keyboard
 )
 from utils.validation import is_valid_name, is_valid_age, normalize_phone
 from database import get_session
 from database.repositories import UserRepository, RegionRepository, InterestRepository
 
 router = Router()
+
+
+async def finish_registration(message: Message, state: FSMContext, edit_mode: bool, phone: str):
+    """Завершает регистрацию и проверяет роль пользователя для перенаправления."""
+    from config import ADMIN_PHONES
+    from utils.validation import normalize_phone
+    
+    await state.clear()
+    
+    normalized_phone = normalize_phone(phone) if phone else None
+    is_admin = normalized_phone in ADMIN_PHONES if normalized_phone else False
+    
+    if is_admin:
+        await message.answer(
+            "Регистрация завершена! Добро пожаловать в админ-панель! 👑",
+            reply_markup=get_admin_menu_keyboard()
+        )
+    else:
+        text = "Профиль обновлён!" if edit_mode else "Регистрация завершена! Добро пожаловать 🎉"
+        await message.answer(text, reply_markup=get_user_main_menu())
 
 @router.message(F.text == "▶️ Продолжить регистрацию")
 async def resume_registration(message: Message, state: FSMContext, user: dict | None):
@@ -72,8 +94,6 @@ async def process_contact(message: Message, state: FSMContext, user: dict | None
         if success:
             await message.answer(f"Номер добавлен. Заполняем профиль.")
         else:
-            # If register failed, it might be that user exists but wasn't in cache yet
-            # Let's try to proceed
             pass
 
     await state.update_data(phone=phone)
@@ -86,7 +106,6 @@ async def reg_name(message: Message, state: FSMContext, user: dict | None):
     data = await state.get_data()
     edit_mode = data.get("edit_mode", False)
 
-    # Validate content type
     if not message.text:
         await message.answer("🚫 Пожалуйста, введите имя текстом. Фотографии и файлы не принимаются.")
         return
@@ -139,7 +158,6 @@ async def reg_surname(message: Message, state: FSMContext, user: dict | None):
     data = await state.get_data()
     edit_mode = data.get("edit_mode", False)
 
-    # Validate content type
     if not message.text:
         await message.answer("🚫 Пожалуйста, введите фамилию текстом. Фотографии и файлы не принимаются.")
         return
@@ -221,7 +239,6 @@ async def reg_age(message: Message, state: FSMContext, user: dict | None):
     data = await state.get_data()
     edit_mode = data.get("edit_mode", False)
 
-    # Validate content type
     if not message.text:
         await message.answer("🚫 Пожалуйста, введите возраст цифрами. Фотографии и файлы не принимаются.")
         return
@@ -253,7 +270,6 @@ async def reg_age(message: Message, state: FSMContext, user: dict | None):
         current = data.get("region", "не указан")
         await message.answer(f"Текущий регион: {current}")
 
-    # Fetch regions async
     async with get_session() as session:
         region_repo = RegionRepository(session)
         regions_list = await region_repo.get_all_names()
@@ -268,7 +284,34 @@ async def reg_region(message: Message, state: FSMContext, user: dict | None):
 
     region = message.text.strip()
     
-    # Fetch regions async for validation
+    if region == "⏭ Регионы еще не добавлены (пропустить)":
+        region = None
+        await state.update_data(region=region)
+        
+        if data.get("single_edit"):
+            data["region"] = region
+            async with get_session() as session:
+                user_repo = UserRepository(session)
+                await user_repo.update_profile(data["phone"], data)
+            await message.answer("Готово!", reply_markup=get_user_main_menu())
+            await message.answer("Регион пропущен.", reply_markup=get_edit_profile_menu())
+            await state.set_state(None)
+            return
+        
+        if not edit_mode:
+            await state.update_data(interests=[])
+        
+        async with get_session() as session:
+            interest_repo = InterestRepository(session)
+            interests_list = await interest_repo.get_all_names()
+        
+        await message.answer(
+            "Укажите ваши интересы (можно выбрать несколько):",
+            reply_markup=get_interests_keyboard(interests_list, data.get("interests", []), edit_mode)
+        )
+        await state.set_state(Registration.interests)
+        return
+    
     async with get_session() as session:
         region_repo = RegionRepository(session)
         regions_list = await region_repo.get_all_names()
@@ -300,7 +343,6 @@ async def reg_region(message: Message, state: FSMContext, user: dict | None):
     if not edit_mode:
         await state.update_data(interests=[])
     
-    # Fetch interests async
     async with get_session() as session:
         interest_repo = InterestRepository(session)
         interests_list = await interest_repo.get_all_names()
@@ -310,6 +352,45 @@ async def reg_region(message: Message, state: FSMContext, user: dict | None):
         reply_markup=get_interests_keyboard(interests_list, data.get("interests", []), edit_mode)
     )
     await state.set_state(Registration.interests)
+
+@router.callback_query(Registration.interests, lambda c: c.data == "skip_interests")
+async def reg_interests_skip(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
+    """Обработка заглушки - пропуск при пустом списке интересов"""
+    data = await state.get_data()
+    edit_mode = data.get("edit_mode", False)
+    
+    await state.update_data(interests=[])
+    
+    if data.get("single_edit"):
+        data["interests"] = []
+        phone = data.get("phone") or (user.get("number") if user else None)
+        if phone:
+            async with get_session() as session:
+                user_repo = UserRepository(session)
+                await user_repo.update_profile(phone, data)
+        
+        await callback.message.answer("Готово!", reply_markup=get_user_main_menu())
+        await callback.message.answer("Интересы пропущены.", reply_markup=get_edit_profile_menu())
+        await state.set_state(None)
+        try:
+            await callback.answer()
+        except TelegramBadRequest:
+            pass
+        return
+    
+    if edit_mode:
+        current = "есть" if data.get("photo_file_id") or data.get("document_file_id") else "нет"
+        await callback.message.answer(f"Текущее фото: {current}")
+    
+    await state.set_state(Registration.photo)
+    await callback.message.answer(
+        "Загрузите фото (jpg, jpeg, png) или пропустите:",
+        reply_markup=get_photo_keyboard(edit_mode)
+    )
+    try:
+        await callback.answer()
+    except TelegramBadRequest:
+        pass
 
 @router.callback_query(Registration.interests)
 async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
@@ -323,7 +404,10 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
             await callback.message.answer("Готово!", reply_markup=get_user_main_menu())
             await callback.message.answer("Интересы оставлены без изменений.", reply_markup=get_edit_profile_menu())
             await state.set_state(None)
-            await callback.answer()
+            try:
+                await callback.answer()
+            except TelegramBadRequest:
+                pass  
             return
 
         await state.set_state(Registration.photo)
@@ -336,12 +420,18 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
             "Загрузите фото (jpg, jpeg, png) или пропустите:",
             reply_markup=get_photo_keyboard(edit_mode)
         )
-        await callback.answer()
+        try:
+            await callback.answer()
+        except TelegramBadRequest:
+            pass  
         return
 
     if callback.data == "done":
         if not interests:
-            await callback.answer("🚫 Укажите хотя бы один интерес.")
+            try:
+                await callback.answer("🚫 Укажите хотя бы один интерес.")
+            except TelegramBadRequest:
+                pass  
             return
 
         await state.update_data(interests=interests)
@@ -357,7 +447,10 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
             await callback.message.answer("Готово!", reply_markup=get_user_main_menu())
             await callback.message.answer("Интересы обновлены!", reply_markup=get_edit_profile_menu())
             await state.set_state(None)
-            await callback.answer()
+            try:
+                await callback.answer()
+            except TelegramBadRequest:
+                pass  
             return
 
         if edit_mode:
@@ -369,7 +462,10 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
             "Загрузите фото (jpg, jpeg, png) или пропустите:",
             reply_markup=get_photo_keyboard(edit_mode)
         )
-        await callback.answer()
+        try:
+            await callback.answer()
+        except TelegramBadRequest:
+            pass  
         return
 
     if callback.data in interests:
@@ -379,7 +475,6 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
 
     await state.update_data(interests=interests)
     
-    # Fetch interests async to update keyboard
     async with get_session() as session:
         interest_repo = InterestRepository(session)
         interests_list = await interest_repo.get_all_names()
@@ -387,7 +482,10 @@ async def reg_interests_callback(callback: types.CallbackQuery, state: FSMContex
     await callback.message.edit_reply_markup(
         reply_markup=get_interests_keyboard(interests_list, interests, edit_mode)
     )
-    await callback.answer()
+    try:
+        await callback.answer()
+    except TelegramBadRequest:
+        pass  
 
 
 @router.message(Registration.photo, F.text == "Оставить без изменений")
@@ -418,7 +516,6 @@ async def reg_photo_media(message: Message, state: FSMContext, user: dict | None
     await state.update_data(photo_file_id=photo.file_id, document_file_id=None)
 
     if data.get("single_edit"):
-        # Explicit update before saving
         data["photo_file_id"] = photo.file_id
         data["document_file_id"] = None
         
@@ -442,6 +539,7 @@ async def reg_photo_media(message: Message, state: FSMContext, user: dict | None
 @router.message(Registration.photo, F.document)
 async def reg_photo_document(message: Message, state: FSMContext, user: dict | None):
     doc = message.document
+    bot = message.bot
 
     if not doc.mime_type or not doc.mime_type.startswith("image/"):
         await message.answer("🚫 Файл не является изображением.")
@@ -451,15 +549,34 @@ async def reg_photo_document(message: Message, state: FSMContext, user: dict | N
         await message.answer("🚫 Поддерживаются только JPG, JPEG, PNG.")
         return
 
-    await state.update_data(document_file_id=doc.file_id, photo_file_id=None)
+    try:
+        import io
+        file = await bot.get_file(doc.file_id)
+        file_bytes = io.BytesIO()
+        await bot.download_file(file.file_path, file_bytes)
+        file_bytes.seek(0)
+        
+        from aiogram.types import BufferedInputFile
+        input_file = BufferedInputFile(file_bytes.read(), filename=doc.file_name)
+        sent_message = await message.answer_photo(photo=input_file, caption="✅ Фото загружено")
+        
+        photo_file_id = sent_message.photo[-1].file_id
+        
+        await sent_message.delete()
+        
+    except Exception as e:
+        logging.error(f"Error converting document to photo: {e}")
+        await message.answer("🚫 Не удалось обработать изображение. Попробуйте отправить как фото.")
+        return
+
+    await state.update_data(photo_file_id=photo_file_id, document_file_id=None)
 
     data = await state.get_data()
     edit_mode = data.get("edit_mode", False)
 
     if data.get("single_edit"):
-        # Explicit update
-        data["document_file_id"] = doc.file_id
-        data["photo_file_id"] = None
+        data["photo_file_id"] = photo_file_id
+        data["document_file_id"] = None
         
         async with get_session() as session:
             user_repo = UserRepository(session)
@@ -536,15 +653,11 @@ async def reg_location_keep(message: Message, state: FSMContext, user: dict | No
         await state.set_state(None)
         return
 
-    # Finish registration/update
     async with get_session() as session:
         user_repo = UserRepository(session)
         await user_repo.update_profile(data["phone"], data)
         
-    await state.clear()
-
-    text = "Профиль обновлён!" if edit_mode else "Регистрация завершена! Добро пожаловать 🎉"
-    await message.answer(text, reply_markup=get_user_main_menu())
+    await finish_registration(message, state, edit_mode, data["phone"])
 
 @router.message(Registration.location, F.location)
 async def reg_location_ok(message: Message, state: FSMContext, user: dict | None):
@@ -555,7 +668,6 @@ async def reg_location_ok(message: Message, state: FSMContext, user: dict | None
         location_lat=message.location.latitude,
         location_lon=message.location.longitude
     )
-    # Refresh data
     data = await state.get_data()
     
     async with get_session() as session:
@@ -568,10 +680,7 @@ async def reg_location_ok(message: Message, state: FSMContext, user: dict | None
         await state.set_state(None)
         return
         
-    await state.clear()
-
-    text = "Профиль обновлён!" if edit_mode else "Регистрация завершена! Добро пожаловать 🎉"
-    await message.answer(text, reply_markup=get_user_main_menu())
+    await finish_registration(message, state, edit_mode, data["phone"])
 
 
 @router.message(Registration.location, F.text == "💻 Ручной ввод координат")
@@ -626,14 +735,7 @@ async def reg_location_manual_process(
             await state.set_state(None)
             return
 
-        await state.clear()
-
-        text_msg = (
-            "Профиль обновлён!"
-            if edit_mode
-            else "Регистрация завершена! Добро пожаловать 🎉"
-        )
-        await message.answer(text_msg, reply_markup=get_user_main_menu())
+        await finish_registration(message, state, edit_mode, phone)
         return
 
     if text == "Оставить без изменений":
@@ -652,10 +754,8 @@ async def reg_location_manual_process(
             async with get_session() as session:
                 user_repo = UserRepository(session)
                 await user_repo.update_profile(phone, data)
-        await state.clear()
 
-        text_msg = "Профиль обновлён!" if edit_mode else "Регистрация завершена! Добро пожаловать 🎉"
-        await message.answer(text_msg, reply_markup=get_user_main_menu())
+        await finish_registration(message, state, edit_mode, phone)
         return
 
     match = re.match(
@@ -701,11 +801,4 @@ async def reg_location_manual_process(
         await state.set_state(None)
         return
         
-    await state.clear()
-
-    text_msg = (
-        "Профиль обновлён!"
-        if edit_mode
-        else "Регистрация завершена! Добро пожаловать 🎉"
-    )
-    await message.answer(text_msg, reply_markup=get_user_main_menu())
+    await finish_registration(message, state, edit_mode, phone)

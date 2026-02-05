@@ -104,7 +104,6 @@ class UserRepository(AsyncRepository[User]):
             )
         )
         
-        # If interests provided, filter by matching interests
         if interests:
             interest_conditions = [
                 User.interests.like(f"%{interest}%") 
@@ -129,7 +128,6 @@ class UserRepository(AsyncRepository[User]):
                 "interests": user_interests
             })
         
-        # Sort by interest overlap if interests provided
         if interests:
             interests_set = set(interests)
             friends.sort(
@@ -181,7 +179,6 @@ class UserRepository(AsyncRepository[User]):
             u_interests = set(user.interests.split(",")) if user.interests else set()
             overlap = len(user_interests & u_interests) if user_interests else 0
             
-            # Skip if interests required but no overlap
             if interests and overlap == 0:
                 continue
             

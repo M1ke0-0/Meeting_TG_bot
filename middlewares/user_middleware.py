@@ -31,7 +31,6 @@ class UserMiddleware(BaseMiddleware):
                 if user:
                     user_data = user.to_dict()
                     
-                    # Override role if in ADMIN_PHONES
                     if user_data["number"] in ADMIN_PHONES:
                         user_data["role"] = "admin"
                     

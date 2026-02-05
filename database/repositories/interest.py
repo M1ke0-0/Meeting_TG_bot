@@ -22,17 +22,15 @@ class InterestRepository(AsyncRepository[Interest]):
             select(Interest.name).order_by(Interest.name)
         )
         interests = [row[0] for row in result.all()]
-        return interests if interests else ["Интересы пока не добавлены"]
+        return interests
     
     async def replace_all(self, interests: List[str]) -> None:
         """
         Replace all interests with new list.
         Deletes existing and inserts new ones.
         """
-        # Delete all existing
         await self.session.execute(delete(Interest))
         
-        # Insert new ones
         for name in interests:
             name = name.strip()
             if name:

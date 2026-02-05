@@ -21,7 +21,6 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
         Join an event.
         Returns (success, error_message).
         """
-        # Check if already participating
         existing = await self.session.execute(
             select(EventParticipant).where(
                 and_(
@@ -40,7 +39,6 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
             )
             await self.add(participant)
             
-            # Update invite status if exists
             await self.session.execute(
                 EventInvite.__table__.update()
                 .where(
@@ -63,7 +61,6 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
         Leave an event.
         Returns (success, message, organizer_phone).
         """
-        # Get event and organizer
         result = await self.session.execute(
             select(Event.organizer_phone).where(Event.id == event_id)
         )
@@ -74,7 +71,6 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
         
         organizer_phone = row[0]
         
-        # Delete participation
         result = await self.session.execute(
             delete(EventParticipant).where(
                 and_(
@@ -87,7 +83,6 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
         if result.rowcount == 0:
             return False, "not_participating", None
         
-        # Update invite status
         await self.session.execute(
             EventInvite.__table__.update()
             .where(
@@ -133,14 +128,12 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
         Remove a participant from event (by organizer).
         Returns (success, participant_tg_id).
         """
-        # Get participant's tg_id for notification
         result = await self.session.execute(
             select(User.tg_id).where(User.number == participant_phone)
         )
         row = result.one_or_none()
         tg_id = row[0] if row else None
         
-        # Delete participation
         delete_result = await self.session.execute(
             delete(EventParticipant).where(
                 and_(

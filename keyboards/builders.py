@@ -105,7 +105,10 @@ def get_gender_keyboard(edit_mode=False):
 
 def get_region_keyboard(regions: list[str], edit_mode=False):
     """Динамическая клавиатура регионов из списка"""
-    kb = [[KeyboardButton(text=region)] for region in regions]
+    if not regions:
+        kb = [[KeyboardButton(text="⏭ Регионы еще не добавлены (пропустить)")]]
+    else:
+        kb = [[KeyboardButton(text=region)] for region in regions]
     
     if edit_mode:
         kb.append([KeyboardButton(text="Оставить без изменений")])
@@ -119,19 +122,25 @@ def get_region_keyboard(regions: list[str], edit_mode=False):
 def get_interests_keyboard(all_interests: list[str], selected: list[str] = [], edit_mode=False) -> InlineKeyboardMarkup:
     """Динамическая inline-клавиатура интересов из списка"""
     inline_kb = InlineKeyboardMarkup(inline_keyboard=[])
-    for interest in all_interests:
-        text = f"✅ {interest}" if interest in selected else interest
-        # Ensure callback data is not too long
-        callback_data = interest[:60] if len(interest.encode('utf-8')) <= 60 else interest[:20]
+    
+    if not all_interests:
         inline_kb.inline_keyboard.append([
-            InlineKeyboardButton(text=text, callback_data=callback_data)
+            InlineKeyboardButton(text="⏭ Интересы еще не добавлены (пропустить)", callback_data="skip_interests")
         ])
+    else:
+        for interest in all_interests:
+            text = f"✅ {interest}" if interest in selected else interest
+            callback_data = interest[:60] if len(interest.encode('utf-8')) <= 60 else interest[:20]
+            inline_kb.inline_keyboard.append([
+                InlineKeyboardButton(text=text, callback_data=callback_data)
+            ])
+        
+        buttons_row = [InlineKeyboardButton(text="Готово", callback_data="done")]
+        if edit_mode:
+            buttons_row.append(InlineKeyboardButton(text="Оставить без изменений", callback_data="keep_current"))
+        
+        inline_kb.inline_keyboard.append(buttons_row)
     
-    buttons_row = [InlineKeyboardButton(text="Готово", callback_data="done")]
-    if edit_mode:
-        buttons_row.append(InlineKeyboardButton(text="Оставить без изменений", callback_data="keep_current"))
-    
-    inline_kb.inline_keyboard.append(buttons_row)
     return inline_kb
 
 def get_photo_keyboard(edit_mode=False):
@@ -240,7 +249,6 @@ def get_participants_manage_keyboard(event_id: int, participants: list) -> Inlin
     for p in participants:
         phone, name, surname, tg_id = p
         display_name = f"{name or ''} {surname or ''}".strip() or "Пользователь"
-        # Use phone hash for callback to avoid issues with long phones
         phone_short = phone[-4:] if phone else "0000"
         buttons.append([
             InlineKeyboardButton(

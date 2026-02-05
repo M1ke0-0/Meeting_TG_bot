@@ -8,7 +8,6 @@ import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase
 
-# Load DATABASE_URL from environment
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
@@ -17,11 +16,9 @@ if not DATABASE_URL:
         "Add to .env: DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/botdb"
     )
 
-# Create async engine
-# TODO: Configure pool_size, max_overflow for production
 engine = create_async_engine(
     DATABASE_URL,
-    echo=False,  # Set to True for SQL debugging
+    echo=False,  
     future=True,
 )
 

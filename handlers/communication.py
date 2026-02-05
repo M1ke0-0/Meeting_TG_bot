@@ -36,11 +36,9 @@ async def communication_menu(message: Message):
     await message.answer("Меню общения", reply_markup=kb)
 
 
-# --- Friends List ---
 
 from states.states import Registration, MessageState
 
-# ... imports ...
 
 @router.message(F.text == "Друзья")
 async def show_friends(message: Message, user: dict | None):
@@ -62,7 +60,6 @@ async def show_friends(message: Message, user: dict | None):
         surname = friend.get('surname') or ""
         text = f"👤 {name} {surname}"
         
-        # Add 'Write Message' and 'Delete' buttons if friend has tg_id
         markup = None
         if friend.get('tg_id'):
             markup = InlineKeyboardMarkup(inline_keyboard=[
@@ -91,7 +88,6 @@ async def ask_delete_friend(callback: types.CallbackQuery, user: dict | None):
 
 @router.callback_query(lambda c: c.data.startswith("del_friend_no_"))
 async def cancel_delete_friend(callback: types.CallbackQuery):
-    # Restore original view (just remove the question)
     original_text = callback.message.text.split("\n\n⚠️")[0]
     friend_id = int(callback.data.split("_")[3])
     
@@ -108,7 +104,6 @@ async def cancel_delete_friend(callback: types.CallbackQuery):
 async def perform_delete_friend(callback: types.CallbackQuery, user: dict | None):
     friend_id = int(callback.data.split("_")[3])
     
-    # Get friend info before deletion
     async with get_session() as session:
         user_repo = UserRepository(session)
         friend_info = await user_repo.get_by_tg_id(friend_id)
@@ -125,17 +120,15 @@ async def perform_delete_friend(callback: types.CallbackQuery, user: dict | None
     
     my_name = f"{user.get('name', '')} {user.get('surname', '')}".strip() or "Пользователь"
     
-    # Notify the user who deleted
     await callback.message.answer(f"❌ Вы удалили {friend_name} из друзей.")
     
-    # Notify the deleted friend
     try:
         await callback.bot.send_message(
             friend_id,
             f"😔 {my_name} удалил(а) вас из друзей."
         )
     except:
-        pass  # User may have blocked the bot
+        pass  
 
 
 @router.callback_query(lambda c: c.data.startswith("write_message_"))
@@ -179,9 +172,7 @@ async def send_friend_message(message: Message, state: FSMContext, user: dict | 
     ])
     
     try:
-        # Handle different content types
         if message.photo:
-            # Photo
             caption = f"{header}\n\n{message.caption or ''}"
             await message.bot.send_photo(
                 target_id,
@@ -191,7 +182,6 @@ async def send_friend_message(message: Message, state: FSMContext, user: dict | 
                 parse_mode=ParseMode.HTML
             )
         elif message.document:
-            # Document/File
             caption = f"{header}\n\n{message.caption or ''}"
             await message.bot.send_document(
                 target_id,
@@ -201,7 +191,6 @@ async def send_friend_message(message: Message, state: FSMContext, user: dict | 
                 parse_mode=ParseMode.HTML
             )
         elif message.audio:
-            # Audio
             caption = f"{header}\n\n{message.caption or ''}"
             await message.bot.send_audio(
                 target_id,
@@ -211,7 +200,6 @@ async def send_friend_message(message: Message, state: FSMContext, user: dict | 
                 parse_mode=ParseMode.HTML
             )
         elif message.video:
-            # Video
             caption = f"{header}\n\n{message.caption or ''}"
             await message.bot.send_video(
                 target_id,
@@ -221,7 +209,6 @@ async def send_friend_message(message: Message, state: FSMContext, user: dict | 
                 parse_mode=ParseMode.HTML
             )
         elif message.voice:
-            # Voice message
             await message.bot.send_message(target_id, header, parse_mode=ParseMode.HTML)
             await message.bot.send_voice(
                 target_id,
@@ -229,7 +216,6 @@ async def send_friend_message(message: Message, state: FSMContext, user: dict | 
                 reply_markup=markup
             )
         elif message.video_note:
-            # Video note (round video)
             await message.bot.send_message(target_id, header, parse_mode=ParseMode.HTML)
             await message.bot.send_video_note(
                 target_id,
@@ -237,7 +223,6 @@ async def send_friend_message(message: Message, state: FSMContext, user: dict | 
                 reply_markup=markup
             )
         elif message.sticker:
-            # Sticker
             await message.bot.send_message(target_id, header, parse_mode=ParseMode.HTML)
             await message.bot.send_sticker(
                 target_id,
@@ -245,7 +230,6 @@ async def send_friend_message(message: Message, state: FSMContext, user: dict | 
                 reply_markup=markup
             )
         elif message.text:
-            # Text message
             await message.bot.send_message(
                 target_id,
                 f"{header}\n\n{message.text}",
@@ -265,7 +249,6 @@ async def send_friend_message(message: Message, state: FSMContext, user: dict | 
     await state.clear()
 
 
-# --- Incoming Requests ---
 
 @router.message(F.text == "Входящие заявки")
 async def show_requests(message: Message, user: dict | None):
@@ -313,52 +296,6 @@ async def show_requests(message: Message, user: dict | None):
         await message.answer(caption, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 
-# Assuming there's an existing `add_friend_request` function or similar callback handler
-# This block is inserted based on the user's instruction to "Update add_friend_request"
-# and the provided snippet's context (e.g., `result == "already_friends"`).
-# If this function does not exist, it would need to be created.
-# For this task, we'll assume it's part of a larger handler that determines `result`.
-# The snippet provided by the user is placed where it logically fits within a request sending flow.
-# Since the full `add_friend_request` function was not provided, this is an illustrative placement.
-# If this is a new function, it would need a decorator like `@router.callback_query(...)`
-# For example, if it's a callback for a button like "Добавить в друзья":
-# @router.callback_query(lambda c: c.data.startswith("add_friend_"))
-# async def add_friend_request(callback: types.CallbackQuery, user: dict | None):
-#     target_id = int(callback.data.split("_")[2])
-#     async with get_session() as session:
-#         friend_repo = FriendRepository(session)
-#         result = await friend_repo.add_friend_request(user['tg_id'], target_id)
-#     if result == "success":
-#         await callback.answer("Заявка отправлена! ✅")
-#         try:
-#             my_name = f"{user.get('name','')} {user.get('surname','')}".strip()
-#             markup = InlineKeyboardMarkup(inline_keyboard=[
-#                 [
-#                     InlineKeyboardButton(text="✅ Принять", callback_data=f"friend_accept_{user['tg_id']}"),
-#                     InlineKeyboardButton(text="❌ Отклонить", callback_data=f"friend_decline_{user['tg_id']}")
-#                 ]
-#             ])
-#             sent_msg = await callback.bot.send_message(
-#                 target_id,
-#                 f"👋 Вам пришла заявка в друзья от {my_name}!",
-#                 reply_markup=markup
-#             )
-#
-#             # Save message_id for mutual request handling
-#             async with get_session() as session_update:
-#                 repo_update = FriendRepository(session_update)
-#                 await repo_update.update_request_message_id(user['tg_id'], target_id, sent_msg.message_id)
-#                 await session_update.commit()
-#
-#         except Exception: # Catch specific exceptions if possible, e.g., TelegramAPIError
-#             pass
-#     elif result == "already_friends":
-#         await callback.answer("Вы уже друзья!", show_alert=True)
-#     elif result == "already_sent":
-#         await callback.answer("Заявка уже была отправлена.", show_alert=True)
-#     else:
-#         await callback.answer("Ошибка при отправке.", show_alert=True)
-
 
 @router.callback_query(lambda c: c.data.startswith("friend_accept_"))
 async def accept_friend(callback: types.CallbackQuery, user: dict | None):
@@ -366,20 +303,17 @@ async def accept_friend(callback: types.CallbackQuery, user: dict | None):
     
     async with get_session() as session:
         friend_repo = FriendRepository(session)
-        # Returns message_id if mutual request existed, 0 if success, None if failed
         result = await friend_repo.accept_request(user['tg_id'], friend_id)
         
-        if result is not None: # Check if the operation was successful (0 or message_id)
+        if result is not None:
             await callback.message.edit_reply_markup(reply_markup=None)
             await callback.answer("Заявка принята! ✅")
             await callback.message.answer("Теперь вы друзья!")
             
-            # Notify sender
             try:
                 my_name = f"{user.get('name','')} {user.get('surname','')}".strip()
                 await callback.bot.send_message(friend_id, f"👋 {my_name} принял(а) вашу заявку в друзья!")
                 
-                # If there was a mutual request (result > 0), remove buttons from friend's chat
                 if isinstance(result, int) and result > 0:
                     try:
                         await callback.bot.edit_message_reply_markup(
@@ -387,15 +321,15 @@ async def accept_friend(callback: types.CallbackQuery, user: dict | None):
                             message_id=result,
                             reply_markup=None
                         )
-                    except Exception: # Catch specific exceptions if possible, e.g., TelegramAPIError
+                    except Exception:
                         pass
-            except Exception: # Catch specific exceptions if possible, e.g., TelegramAPIError
+            except Exception:
                 pass
-        else: # result is None, meaning the operation failed
+        else:
             try:
                 await callback.answer("Ошибка при добавлении.")
             except TelegramBadRequest:
-                pass  # Query is too old
+                pass  
 
 
 @router.callback_query(lambda c: c.data.startswith("friend_decline_"))
@@ -410,10 +344,9 @@ async def decline_friend(callback: types.CallbackQuery, user: dict | None):
     try:
         await callback.answer("Заявка отклонена ❌")
     except TelegramBadRequest:
-        pass  # Query is too old
+        pass  
 
 
-# --- Search Friends ---
 
 @router.message(F.text == "Поиск друзей")
 async def search_friends_start(message: Message, state: FSMContext):
@@ -473,13 +406,11 @@ async def search_gender(message: Message, state: FSMContext):
     
     await state.update_data(gender=gender)
     
-    # Fetch regions async
     async with get_session() as session:
         region_repo = RegionRepository(session)
         regions_list = await region_repo.get_all_names()
 
     kb = get_region_keyboard(regions_list)
-    # Add 'Any' option
     kb.keyboard.insert(0, [KeyboardButton(text="Любой")])
     
     await message.answer("В каком регионе?", reply_markup=kb)
@@ -506,7 +437,6 @@ async def search_age(message: Message, state: FSMContext):
         
     await state.update_data(age_range=age_str)
     
-    # Fetch interests async
     async with get_session() as session:
         interest_repo = InterestRepository(session)
         interests_list = await interest_repo.get_all_names()
@@ -529,7 +459,6 @@ async def search_interests(callback: types.CallbackQuery, state: FSMContext, use
         await callback.answer()
         return
         
-    # Handling interest selection
     if callback.data in interests:
         interests.remove(callback.data)
     else:
@@ -537,7 +466,6 @@ async def search_interests(callback: types.CallbackQuery, state: FSMContext, use
         
     await state.update_data(interests=interests)
     
-    # Fetch interests async
     async with get_session() as session:
         interest_repo = InterestRepository(session)
         interests_list = await interest_repo.get_all_names()
@@ -585,7 +513,6 @@ async def show_search_results(message: Message, results: list, user: dict):
             f"❤️ Интересы: {user_interests}"
         )
         
-        # Check friend status
         async with get_session() as session:
             friend_repo = FriendRepository(session)
             is_friend = await friend_repo.is_friend(user['tg_id'], tg_id)
@@ -618,7 +545,6 @@ async def add_friend_request(callback: types.CallbackQuery, user: dict | None):
         if result == "ok":
             await callback.answer("Заявка отправлена! 📨", show_alert=True)
             
-            # Get target user info for notification
             async with get_session() as session2:
                 user_repo = UserRepository(session2)
                 target_user = await user_repo.get_by_tg_id(target_id)
@@ -626,13 +552,11 @@ async def add_friend_request(callback: types.CallbackQuery, user: dict | None):
                 if target_user:
                     target_name = f"{target_user.name or ''} {target_user.surname or ''}".strip() or "пользователю"
             
-            # Notify sender about sent request
             await callback.message.answer(
                 f"📤 Заявка в друзья отправлена {target_name}!\n"
                 f"Ожидайте ответа."
             )
             
-            # Notify target about incoming request
             try:
                 my_name = f"{user.get('name','')} {user.get('surname','')}".strip()
                 

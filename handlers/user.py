@@ -93,8 +93,20 @@ async def show_my_profile(message: Message, user: dict | None):
     from utils.validation import escape_html
     safe_name = escape_html(user['name'] or '—')
     safe_surname = escape_html(user['surname'] or '')
-    safe_region = escape_html(user['region'] or '')
-    safe_interests = escape_html(user['interests'].replace(',', ', ') if user['interests'] else '')
+    
+    region = user['region'] or ''
+    if region == "Регионы пока не добавлены":
+        region = ''
+    safe_region = escape_html(region)
+    
+    interests_raw = user['interests'] or ''
+    if interests_raw:
+        interests_list = [i.strip() for i in interests_raw.split(',') if i.strip() and i.strip() != "Интересы пока не добавлены"]
+        interests_clean = ', '.join(interests_list)
+    else:
+        interests_clean = ''
+    safe_interests = escape_html(interests_clean)
+    
     safe_gender = escape_html(user['gender'] or '')
 
     text = f"👤 <b>{safe_name} {safe_surname}</b>\n"
@@ -102,10 +114,29 @@ async def show_my_profile(message: Message, user: dict | None):
         text += f"🎂 Возраст: {user['age']}\n"
     if user['gender']:
         text += f"🚻 Пол: {safe_gender}\n"
-    if user['region']:
+    if region:
         text += f"📍 Регион: {safe_region}\n"
-    if user['interests']:
+    if interests_clean:
         text += f"❤️ Интересы: {safe_interests}\n"
+
+    missing_fields = []
+    async with get_session() as session:
+        user_has_region = bool(region)  
+        if not user_has_region:
+            region_repo = RegionRepository(session)
+            regions_in_db = await region_repo.get_all_names()
+            if regions_in_db: 
+                missing_fields.append("регион")
+        
+        user_has_interests = bool(interests_clean) 
+        if not user_has_interests:
+            interest_repo = InterestRepository(session)
+            interests_in_db = await interest_repo.get_all_names()
+            if interests_in_db:  
+                missing_fields.append("интересы")
+    
+    if missing_fields:
+        text += f"\n⚠️ <b>Пожалуйста, заполните:</b> {', '.join(missing_fields)}\n"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Редактировать данные", callback_data="edit_profile")]
@@ -223,7 +254,6 @@ async def edit_field_region(callback: types.CallbackQuery, state: FSMContext, us
     data = await state.get_data()
     current = data.get("region", "не указано")
     
-    # Fetch regions async
     async with get_session() as session:
         region_repo = RegionRepository(session)
         regions_list = await region_repo.get_all_names()
@@ -242,7 +272,6 @@ async def edit_field_interests(callback: types.CallbackQuery, state: FSMContext,
     current_list = data.get("interests", [])
     current = ", ".join(current_list) if current_list else "не указаны"
     
-    # Fetch interests async
     async with get_session() as session:
         interest_repo = InterestRepository(session)
         interests_list = await interest_repo.get_all_names()

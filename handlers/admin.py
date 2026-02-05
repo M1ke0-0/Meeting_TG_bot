@@ -51,20 +51,16 @@ async def process_excel(message: Message, state: FSMContext, user: dict | None):
         interests = []
         regions = []
         
-        # Support multiple sheet name variants
         interest_sheet_names = ["Interests", "Интересы", "interests", "интересы"]
         region_sheet_names = ["Regions", "Регионы", "regions", "регионы"]
         
-        # Find interests sheet
         interest_ws = None
         for name in interest_sheet_names:
             if name in wb.sheetnames:
                 interest_ws = wb[name]
                 break
         
-        # If no specific sheet found and there's only one sheet, try to use it for both
         if interest_ws is None and len(wb.sheetnames) == 1:
-            # Single sheet mode - try first column for interests, second for regions
             ws = wb.active
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if row and len(row) >= 1 and row[0]:
@@ -72,13 +68,11 @@ async def process_excel(message: Message, state: FSMContext, user: dict | None):
                 if row and len(row) >= 2 and row[1]:
                     regions.append(str(row[1]).strip())
         else:
-            # Multi-sheet mode
             if interest_ws:
                 for row in interest_ws.iter_rows(min_row=2, values_only=True):
                     if row[0]:
                         interests.append(str(row[0]).strip())
             
-            # Find regions sheet
             for name in region_sheet_names:
                 if name in wb.sheetnames:
                     region_ws = wb[name]
@@ -87,7 +81,6 @@ async def process_excel(message: Message, state: FSMContext, user: dict | None):
                             regions.append(str(row[0]).strip())
                     break
         
-        # Update database async
         async with get_session() as session:
             interest_repo = InterestRepository(session)
             region_repo = RegionRepository(session)
@@ -104,11 +97,11 @@ async def process_excel(message: Message, state: FSMContext, user: dict | None):
             reply_markup=get_admin_menu_keyboard()
         )
         
-        # Delete the message with file for confidentiality
+        
         try:
             await message.delete()
         except Exception:
-            pass  # Message might already be deleted or bot has no permission
+            pass 
         
         await state.clear()
 
@@ -128,8 +121,7 @@ async def report_users(message: Message, user: dict | None):
     filename = f"users_report_{uuid.uuid4()}.xlsx"
     
     try:
-        # Note: export_users_report needs to be async or run in thread
-        # For now, we assume we updated utils/excel.py to be async
+       
         await export_users_report(filename)
         
         input_file = types.FSInputFile(filename)

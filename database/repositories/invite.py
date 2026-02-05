@@ -21,7 +21,6 @@ class InviteRepository(AsyncRepository[EventInvite]):
         Create invitation record.
         Returns True on success, False if already exists.
         """
-        # Check if already invited
         existing = await self.session.execute(
             select(EventInvite).where(
                 and_(

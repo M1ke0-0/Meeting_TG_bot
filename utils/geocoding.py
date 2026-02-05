@@ -7,7 +7,6 @@ def get_coordinates(address: str) -> Optional[Tuple[float, float, str]]:
     Returns (latitude, longitude, formatted_address) or None if not found.
     """
     try:
-        # User-Agent is required by Nominatim
         geolocator = Nominatim(user_agent="anty_test_bot_v1")
         location = geolocator.geocode(address)
         

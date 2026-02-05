@@ -43,7 +43,6 @@ class EventRepository(AsyncRepository[Event]):
             )
             await self.add(event)
             
-            # Add organizer as first participant
             participant = EventParticipant(
                 event_id=event.id,
                 participant_phone=organizer_phone
@@ -77,7 +76,6 @@ class EventRepository(AsyncRepository[Event]):
         Get events from friends (not user's own events).
         Returns list of tuples matching original format.
         """
-        # Get user's tg_id
         result = await self.session.execute(
             select(User.tg_id).where(User.number == user_phone)
         )
@@ -86,7 +84,6 @@ class EventRepository(AsyncRepository[Event]):
             return []
         user_tg_id = user_tg_id_row[0]
         
-        # Get friend tg_ids (both directions)
         result = await self.session.execute(
             select(Friend.friend_id).where(Friend.user_id == user_tg_id)
         )
@@ -102,7 +99,6 @@ class EventRepository(AsyncRepository[Event]):
         if not friend_tg_ids:
             return []
         
-        # Get events from friends
         result = await self.session.execute(
             select(
                 Event.id, Event.name, Event.date, Event.time,
@@ -120,11 +116,9 @@ class EventRepository(AsyncRepository[Event]):
         )
         events = result.all()
         
-        # Check participation for each event
         events_with_participation = []
         for event in events:
             event_id = event[0]
-            # Check if user is participant
             part_result = await self.session.execute(
                 select(EventParticipant).where(
                     and_(
@@ -143,7 +137,6 @@ class EventRepository(AsyncRepository[Event]):
         Get user's events: organized and participated.
         Returns (organized_events, participated_events) in original format.
         """
-        # Get organized events
         result = await self.session.execute(
             select(
                 Event.id, Event.name, Event.date, Event.time,
@@ -154,9 +147,8 @@ class EventRepository(AsyncRepository[Event]):
             .order_by(Event.created_at.desc())
         )
         organized_raw = result.all()
-        organized = [(*e, 1, 0) for e in organized_raw]  # is_organizer=1, is_participant=0
+        organized = [(*e, 1, 0) for e in organized_raw]  
         
-        # Get participated events (not organized by user)
         result = await self.session.execute(
             select(
                 Event.id, Event.name, Event.date, Event.time,
@@ -173,6 +165,6 @@ class EventRepository(AsyncRepository[Event]):
             .order_by(Event.created_at.desc())
         )
         participated_raw = result.all()
-        participated = [(*e, 0, 1) for e in participated_raw]  # is_organizer=0, is_participant=1
+        participated = [(*e, 0, 1) for e in participated_raw]  
         
         return organized, participated

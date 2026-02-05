@@ -34,7 +34,6 @@ async def export_users_report(filepath: str):
             ]
             ws.append(row)
 
-        # Run file blocking operation in thread pool to avoid blocking event loop
         await asyncio.to_thread(wb.save, filepath)
 
 
@@ -60,7 +59,6 @@ async def export_events_report(filepath: str):
         ws.append(headers)
 
         for event in events:
-            # Get actual participant count
             participants = await part_repo.get_participants(event.id)
             participant_count = len(participants) if participants else 0
             

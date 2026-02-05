@@ -17,14 +17,11 @@ from .models import (
 )
 
 __all__ = [
-    # Config
     "engine",
     "Base",
     "DATABASE_URL",
-    # Session
     "get_session",
     "async_session_maker",
-    # Models
     "User",
     "Event",
     "EventParticipant",
