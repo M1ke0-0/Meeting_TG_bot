@@ -1,6 +1,3 @@
-"""
-Participant repository for event participation operations.
-"""
 from typing import Optional, List, Tuple
 
 from sqlalchemy import select, delete, and_
@@ -11,16 +8,12 @@ from .base import AsyncRepository
 
 
 class ParticipantRepository(AsyncRepository[EventParticipant]):
-    """Repository for EventParticipant model operations."""
     
     def __init__(self, session: AsyncSession):
         super().__init__(EventParticipant, session)
     
     async def join_event(self, event_id: int, phone: str) -> Tuple[bool, Optional[str]]:
-        """
-        Join an event.
-        Returns (success, error_message).
-        """
+    
         existing = await self.session.execute(
             select(EventParticipant).where(
                 and_(
@@ -57,10 +50,7 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
     async def leave_event(
         self, event_id: int, phone: str
     ) -> Tuple[bool, str, Optional[str]]:
-        """
-        Leave an event.
-        Returns (success, message, organizer_phone).
-        """
+        
         result = await self.session.execute(
             select(Event.organizer_phone).where(Event.id == event_id)
         )
@@ -97,7 +87,6 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
         return True, "success", organizer_phone
     
     async def get_participants(self, event_id: int) -> List[Tuple[str, str, int]]:
-        """Get list of participants: (name, surname, age)."""
         result = await self.session.execute(
             select(User.name, User.surname, User.age)
             .join(
@@ -110,7 +99,6 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
         return list(result.all())
     
     async def get_participant_ids(self, event_id: int) -> List[int]:
-        """Get telegram IDs of all participants."""
         result = await self.session.execute(
             select(User.tg_id)
             .join(
@@ -124,10 +112,7 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
     async def remove_participant(
         self, event_id: int, participant_phone: str
     ) -> Tuple[bool, Optional[int]]:
-        """
-        Remove a participant from event (by organizer).
-        Returns (success, participant_tg_id).
-        """
+        
         result = await self.session.execute(
             select(User.tg_id).where(User.number == participant_phone)
         )
@@ -151,7 +136,6 @@ class ParticipantRepository(AsyncRepository[EventParticipant]):
     async def get_participants_with_details(
         self, event_id: int
     ) -> List[Tuple[str, str, str, int]]:
-        """Get participants with details: (phone, name, surname, tg_id)."""
         result = await self.session.execute(
             select(User.number, User.name, User.surname, User.tg_id)
             .join(

@@ -5,10 +5,6 @@ from database.repositories import UserRepository, EventRepository
 from database.models import User, Event, EventParticipant, Interest, Region
 
 async def export_users_report(filepath: str):
-    """
-    Generates an Excel report of all users.
-    Columns: Phone, Role, Name, Surname, Gender, Age, Region, Interests, Photo ID
-    """
     async with get_session() as session:
         user_repo = UserRepository(session)
         users = await user_repo.get_all()
@@ -38,9 +34,7 @@ async def export_users_report(filepath: str):
 
 
 async def export_events_report(filepath: str):
-    """
-    Generates an Excel report of all events with participant counts.
-    """
+
     from database.repositories import ParticipantRepository
     
     async with get_session() as session:

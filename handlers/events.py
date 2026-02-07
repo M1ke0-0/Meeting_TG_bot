@@ -27,13 +27,11 @@ from database.repositories import (
 router = Router()
 
 def mask_phone(phone: str) -> str:
-    """Mask phone number for privacy, showing only last 4 digits."""
     if not phone or len(phone) < 4:
         return "***"
     return f"***{phone[-4:]}"
 
 async def get_event_card_text(event: dict, session=None):
-    """Формирует текст карточки мероприятия с экранированием HTML"""
     safe_name = escape_html(event.get('name', ''))
     safe_date = escape_html(event.get('date', ''))
     safe_time = escape_html(event.get('time', ''))
@@ -321,7 +319,6 @@ async def event_invite_friends(message: Message, state: FSMContext, user: dict |
 
 
 async def _create_event_without_invites(message: Message, state: FSMContext, user: dict, data: dict):
-    """Helper to create event without inviting anyone."""
     async with get_session() as session:
         event_repo = EventRepository(session)
         event_id = await event_repo.create(user["number"], data)
@@ -392,7 +389,6 @@ async def _create_event_with_invites(
     callback: types.CallbackQuery, state: FSMContext, 
     user: dict, data: dict, selected_tg_ids: list
 ):
-    """Create event and send invites to selected friends."""
     notifications_to_send = []
     invited_count = 0
     
@@ -646,7 +642,6 @@ async def view_participants(callback: types.CallbackQuery, user: dict | None):
 
 @router.callback_query(F.data.startswith("manage_participants_"))
 async def manage_participants(callback: types.CallbackQuery, user: dict | None):
-    """Show participants with remove buttons for organizer."""
     event_id = int(callback.data.split("_")[2])
     
     async with get_session() as session:
@@ -674,7 +669,6 @@ async def manage_participants(callback: types.CallbackQuery, user: dict | None):
 
 @router.callback_query(F.data.startswith("rm_part_"))
 async def remove_participant_handler(callback: types.CallbackQuery, user: dict | None):
-    """Remove a participant from event (organizer only)."""
     parts = callback.data.split("_")
     event_id = int(parts[2])
     phone_suffix = parts[3]  
@@ -732,14 +726,12 @@ async def remove_participant_handler(callback: types.CallbackQuery, user: dict |
 
 @router.callback_query(F.data.startswith("back_participants_"))
 async def back_from_manage(callback: types.CallbackQuery):
-    """Back to event menu from participant management."""
     await callback.message.delete()
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("invite_to_event_"))
 async def invite_users_to_event(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
-    """Invite friends to an existing event (from My Events)."""
     event_id = int(callback.data.split("_")[3])
     
     async with get_session() as session:
@@ -772,7 +764,6 @@ async def invite_users_to_event(callback: types.CallbackQuery, state: FSMContext
 
 @router.callback_query(lambda c: c.data in ["sel_all_friends", "send_invites", "cancel_invites"] or c.data.startswith("sel_friend_"))
 async def handle_invite_selection(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
-    """Handle friend selection for existing event invites."""
     data = await state.get_data()
     
     if 'invite_event_id' not in data:

@@ -1,9 +1,3 @@
-"""
-Main bot entry point with async database initialization.
-
-TODO: Add Alembic migrations for production deployments
-TODO: Add database connection health checks
-"""
 import asyncio
 import logging
 import sys
@@ -22,15 +16,12 @@ from handlers import user, admin, registration, events, communication
 
 
 async def init_database():
-    """Initialize database tables."""
     async with engine.begin() as conn:
-        # TODO: Replace with Alembic migrations in production
         await conn.run_sync(Base.metadata.create_all)
     logging.info("Database tables initialized")
 
 
 async def check_reference_data():
-    """Check if regions and interests tables have data."""
     async with get_session() as session:
         region_repo = RegionRepository(session)
         interest_repo = InterestRepository(session)
@@ -45,13 +36,11 @@ async def check_reference_data():
 
 
 async def close_database():
-    """Close database connections."""
     await engine.dispose()
     logging.info("Database connections closed")
 
 
 async def main():
-    # Initialize database
     await init_database()
     await check_reference_data()
 
@@ -63,11 +52,9 @@ async def main():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
-    # Middleware
     dp.message.middleware(UserMiddleware())
     dp.callback_query.middleware(UserMiddleware())
 
-    # Routers
     dp.include_router(user.router)
     dp.include_router(registration.router)
     dp.include_router(admin.router)

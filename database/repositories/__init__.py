@@ -1,6 +1,3 @@
-"""
-Repository module exports.
-"""
 from .base import AsyncRepository
 from .user import UserRepository
 from .friend import FriendRepository

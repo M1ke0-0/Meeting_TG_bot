@@ -1,8 +1,3 @@
-"""
-SQLAlchemy ORM models for the Telegram bot.
-
-All models use declarative style with SQLAlchemy 2.x.
-"""
 from datetime import datetime
 from typing import Optional, List
 
@@ -16,7 +11,6 @@ from .db_config import Base
 
 
 class User(Base):
-    """User model - registered bot users."""
     __tablename__ = "users"
     
     number: Mapped[str] = mapped_column(String(20), primary_key=True)
@@ -53,7 +47,6 @@ class User(Base):
     )
     
     def to_dict(self) -> dict:
-        """Convert to dictionary for handler compatibility."""
         return {
             "tg_id": self.tg_id,
             "number": self.number,
@@ -73,7 +66,6 @@ class User(Base):
 
 
 class Event(Base):
-    """Event model - user-organized events."""
     __tablename__ = "events"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -112,7 +104,6 @@ class Event(Base):
     )
     
     def to_dict(self) -> dict:
-        """Convert to dictionary for handler compatibility."""
         return {
             "id": self.id,
             "organizer_phone": self.organizer_phone,
@@ -130,7 +121,6 @@ class Event(Base):
 
 
 class EventParticipant(Base):
-    """Event participants - users who joined an event."""
     __tablename__ = "event_participants"
     
     event_id: Mapped[int] = mapped_column(
@@ -154,7 +144,6 @@ class EventParticipant(Base):
 
 
 class EventInvite(Base):
-    """Event invitations - track invite status."""
     __tablename__ = "event_invites"
     
     event_id: Mapped[int] = mapped_column(
@@ -183,7 +172,6 @@ class EventInvite(Base):
 
 
 class Friend(Base):
-    """Friend relationships between users."""
     __tablename__ = "friends"
     
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -196,7 +184,6 @@ class Friend(Base):
 
 
 class FriendRequest(Base):
-    """Pending friend requests."""
     __tablename__ = "friend_requests"
     
     from_user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -210,7 +197,6 @@ class FriendRequest(Base):
 
 
 class Interest(Base):
-    """Interest reference table."""
     __tablename__ = "interests"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -218,7 +204,6 @@ class Interest(Base):
 
 
 class Region(Base):
-    """Region reference table."""
     __tablename__ = "regions"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

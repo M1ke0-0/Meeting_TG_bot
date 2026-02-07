@@ -1,6 +1,3 @@
-"""
-Interest repository for managing interest reference data.
-"""
 from typing import List
 
 from sqlalchemy import select, delete
@@ -11,13 +8,11 @@ from .base import AsyncRepository
 
 
 class InterestRepository(AsyncRepository[Interest]):
-    """Repository for Interest model operations."""
     
     def __init__(self, session: AsyncSession):
         super().__init__(Interest, session)
     
     async def get_all_names(self) -> List[str]:
-        """Get all interest names ordered alphabetically."""
         result = await self.session.execute(
             select(Interest.name).order_by(Interest.name)
         )
@@ -25,10 +20,6 @@ class InterestRepository(AsyncRepository[Interest]):
         return interests
     
     async def replace_all(self, interests: List[str]) -> None:
-        """
-        Replace all interests with new list.
-        Deletes existing and inserts new ones.
-        """
         await self.session.execute(delete(Interest))
         
         for name in interests:

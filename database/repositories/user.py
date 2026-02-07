@@ -1,8 +1,4 @@
-"""
-User repository for async database operations.
 
-Replaces database/users.py with async SQLAlchemy operations.
-"""
 from typing import Optional, List
 
 from sqlalchemy import select, update, and_, or_
@@ -13,27 +9,21 @@ from .base import AsyncRepository
 
 
 class UserRepository(AsyncRepository[User]):
-    """Repository for User model operations."""
     
     def __init__(self, session: AsyncSession):
         super().__init__(User, session)
     
     async def get_by_phone(self, phone: str) -> Optional[User]:
-        """Get user by phone number."""
         return await self.get(phone)
     
     async def get_by_tg_id(self, tg_id: int) -> Optional[User]:
-        """Get user by Telegram ID."""
         result = await self.session.execute(
             select(User).where(User.tg_id == tg_id)
         )
         return result.scalar_one_or_none()
     
     async def check_user_status(self, phone: str) -> dict:
-        """
-        Check user status by phone.
-        Returns dict with exists, role, registered, tg_id, name.
-        """
+        
         user = await self.get_by_phone(phone)
         if user:
             return {
@@ -46,10 +36,6 @@ class UserRepository(AsyncRepository[User]):
         return {"exists": False}
     
     async def register_phone(self, phone: str, tg_id: int, role: str = "user") -> bool:
-        """
-        Register new user with phone and telegram ID.
-        Returns True on success, False if user already exists.
-        """
         existing = await self.get_by_phone(phone)
         if existing:
             return False
@@ -64,7 +50,6 @@ class UserRepository(AsyncRepository[User]):
         return True
     
     async def update_profile(self, phone: str, data: dict) -> bool:
-        """Update user profile with provided data."""
         interests = data.get("interests", [])
         interests_str = ",".join(interests) if interests else None
         
@@ -92,10 +77,7 @@ class UserRepository(AsyncRepository[User]):
         organizer_phone: str, 
         interests: Optional[List[str]] = None
     ) -> List[dict]:
-        """
-        Find potential friends excluding current user.
-        Optionally filter by interests and sort by interest overlap.
-        """
+    
         query = select(User).where(
             and_(
                 User.number != organizer_phone,
@@ -145,9 +127,7 @@ class UserRepository(AsyncRepository[User]):
         age_range: Optional[str] = None,
         interests: Optional[List[str]] = None
     ) -> List[dict]:
-        """
-        Search users with filters. Used in communication.py perform_search.
-        """
+        
         query = select(User).where(
             and_(
                 User.registered == 1,

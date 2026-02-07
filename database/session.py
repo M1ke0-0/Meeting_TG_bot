@@ -1,8 +1,3 @@
-"""
-Async session factory for SQLAlchemy.
-
-Provides get_session() context manager for dependency injection in handlers.
-"""
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -20,13 +15,6 @@ async_session_maker = async_sessionmaker(
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Async context manager for database sessions.
-    
-    Usage:
-        async with get_session() as session:
-            result = await session.execute(query)
-    """
     async with async_session_maker() as session:
         try:
             yield session

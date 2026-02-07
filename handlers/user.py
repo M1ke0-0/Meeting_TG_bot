@@ -309,7 +309,6 @@ async def edit_field_location(callback: types.CallbackQuery, state: FSMContext, 
 
 @router.message(F.text == "❓ Помощь")
 async def show_help(message: Message, user: dict | None):
-    """Display help message with brief bot usage instructions."""
     help_text = (
         "📖 <b>Инструкция по работе с ботом</b>\n\n"
         

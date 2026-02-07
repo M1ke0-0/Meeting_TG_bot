@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-"""
-Скрипт для полной очистки базы данных.
-
-Удаляет все таблицы и пересоздаёт их заново.
-Запуск: python reset_db.py
-"""
 import asyncio
 import sys
 
@@ -19,7 +12,6 @@ from database.models import (
 
 
 async def reset_database():
-    """Удаляет все таблицы и создаёт их заново."""
     print("⚠️  ВНИМАНИЕ: Все данные будут удалены!")
     
     confirm = input("Введите 'yes' для подтверждения: ")

@@ -1,8 +1,3 @@
-"""
-User middleware for loading user data from database.
-
-Injects 'user' dict into handler data for every message/callback.
-"""
 import logging
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery
@@ -13,7 +8,6 @@ from database.repositories import UserRepository
 
 
 class UserMiddleware(BaseMiddleware):
-    """Middleware that loads user data from PostgreSQL for each request."""
     
     async def __call__(self, handler, event: TelegramObject, data: dict):
         if isinstance(event, Message):

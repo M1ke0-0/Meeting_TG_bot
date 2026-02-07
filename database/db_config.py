@@ -1,9 +1,3 @@
-"""
-Database configuration for PostgreSQL with async SQLAlchemy 2.x
-
-TODO: Add Alembic migrations for production deployments
-TODO: Add connection pooling configuration for high load
-"""
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase
@@ -24,5 +18,4 @@ engine = create_async_engine(
 
 
 class Base(AsyncAttrs, DeclarativeBase):
-    """Base class for all SQLAlchemy models."""
     pass

@@ -1,8 +1,3 @@
-"""
-Event repository for async database operations.
-
-Replaces database/events.py with async SQLAlchemy operations.
-"""
 from typing import Optional, List, Tuple
 
 from sqlalchemy import select, and_, or_
@@ -14,16 +9,11 @@ from .base import AsyncRepository
 
 
 class EventRepository(AsyncRepository[Event]):
-    """Repository for Event model operations."""
     
     def __init__(self, session: AsyncSession):
         super().__init__(Event, session)
     
     async def create(self, organizer_phone: str, data: dict) -> Optional[int]:
-        """
-        Create new event and add organizer as participant.
-        Returns event ID on success, None on failure.
-        """
         try:
             interests = data.get("interests", [])
             interests_str = ",".join(interests) if interests else None
@@ -55,7 +45,6 @@ class EventRepository(AsyncRepository[Event]):
             return None
     
     async def get_by_id(self, event_id: int) -> Optional[dict]:
-        """Get event by ID with organizer's tg_id."""
         result = await self.session.execute(
             select(Event, User.tg_id)
             .outerjoin(User, Event.organizer_phone == User.number)
@@ -72,10 +61,6 @@ class EventRepository(AsyncRepository[Event]):
         return event_dict
     
     async def get_friends_events(self, user_phone: str) -> List[Tuple]:
-        """
-        Get events from friends (not user's own events).
-        Returns list of tuples matching original format.
-        """
         result = await self.session.execute(
             select(User.tg_id).where(User.number == user_phone)
         )
@@ -133,10 +118,7 @@ class EventRepository(AsyncRepository[Event]):
         return events_with_participation
     
     async def get_my_events(self, user_phone: str) -> Tuple[List, List]:
-        """
-        Get user's events: organized and participated.
-        Returns (organized_events, participated_events) in original format.
-        """
+ 
         result = await self.session.execute(
             select(
                 Event.id, Event.name, Event.date, Event.time,

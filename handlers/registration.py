@@ -20,7 +20,6 @@ router = Router()
 
 
 async def finish_registration(message: Message, state: FSMContext, edit_mode: bool, phone: str):
-    """Завершает регистрацию и проверяет роль пользователя для перенаправления."""
     from config import ADMIN_PHONES
     from utils.validation import normalize_phone
     
@@ -355,7 +354,6 @@ async def reg_region(message: Message, state: FSMContext, user: dict | None):
 
 @router.callback_query(Registration.interests, lambda c: c.data == "skip_interests")
 async def reg_interests_skip(callback: types.CallbackQuery, state: FSMContext, user: dict | None):
-    """Обработка заглушки - пропуск при пустом списке интересов"""
     data = await state.get_data()
     edit_mode = data.get("edit_mode", False)
     
